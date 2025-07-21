@@ -18,7 +18,8 @@ export class IRMQTTPlatformAccessory {
     On: false,
     Mode: 3, // 0: Off, 1: Heat, 2: Cool, 3: Auto, 4: Fan
     TargetMode: 2,
-    TargetTemp: 22
+    TargetTemp: 22,
+    rotationSpeed: 1
   };
 
 
@@ -150,7 +151,7 @@ export class IRMQTTPlatformAccessory {
     this.acstate.TargetMode = this.platform.Characteristic.TargetHeaterCoolerState.COOL;
 
     this.platform.log.debug('Set Characteristic Mode -> ', value);
-    return this.acstate.TargetMode;
+    
   }
   /**
   * Handle "SET" requests from HomeKit
@@ -190,7 +191,7 @@ export class IRMQTTPlatformAccessory {
     this.platform.log.debug('Set Characteristic Mode -> ', value);
     return this.acstate.TargetTemp;
   }
-  
+
   /**
   * Handle "SET" requests from HomeKit
   * These are sent when the user changes the state of an accessory, for example, changing the Mode
@@ -199,6 +200,32 @@ export class IRMQTTPlatformAccessory {
     // implement your own code to set the Mode
 
     this.acstate.TargetTemp = Math.floor(Math.random() * (30 - 17 + 1)) + 17;
+
+    this.platform.log.debug('Set Characteristic Mode -> ', value);
+
+  }
+
+  /**
+* Handle "SET" requests from HomeKit
+* These are sent when the user changes the state of an accessory, for example, changing the Mode
+*/
+  async handleRotationSpeedGet(value: CharacteristicValue) {
+    // implement your own code to set the Mode
+
+    this.acstate.rotationSpeed = Math.floor(Math.random() * 10) + 1;
+
+    this.platform.log.debug('Set Characteristic Mode -> ', value);
+    return this.acstate.rotationSpeed;
+  }
+
+  /**
+  * Handle "SET" requests from HomeKit
+  * These are sent when the user changes the state of an accessory, for example, changing the Mode
+  */
+  async handleRotationSpeedSet(value: CharacteristicValue) {
+    // implement your own code to set the Mode
+
+    this.acstate.rotationSpeed = Math.floor(Math.random() * 10) + 1;
 
     this.platform.log.debug('Set Characteristic Mode -> ', value);
 
