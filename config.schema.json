@@ -1,0 +1,57 @@
+{
+  "pluginAlias": "ESP8266 IR MQTT",
+  "pluginType": "platform",
+  "singular": true,
+  "strictValidation": false,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "Name",
+        "type": "string",
+        "required": true,
+        "default": "AC"
+      },
+      "accessory": {
+        "title": "Accessory",
+        "type": "string",
+        "required": true,
+        "default": "ircompanion"
+      },
+      "serviceType": {
+        "title": "Service Type",
+        "type": "string",
+        "required": true,
+        "default": "HeaterCooler"
+      },
+      "mqtt": {
+        "title": "MQTT Settings",
+        "type": "array",
+        "items": {
+          "server": {
+            "title": "Server",
+            "type": "string",
+            "required": true,
+            "default": "localhost:1883"
+          },
+          "username": {
+            "title": "MQTT username",
+            "type": "string",
+            "default": "admin"
+          },
+          "password": {
+            "title": "MQTT Password",
+            "type": "string",
+            "default": ""
+          },
+          "prefix": {
+            "title": "Service Prefix",
+            "type": "string",
+            "required": true,
+            "default": "ir_remote"
+          }
+        }
+      }
+    }
+  }
+}
