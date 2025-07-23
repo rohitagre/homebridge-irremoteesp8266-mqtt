@@ -1,6 +1,6 @@
 {
   "name": "homebridge-irremoteesp8266-mqtt",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Homebridge plugin to control IR devices using ESP8266 IRremoteESP8266 library and MQTT.",
   "keywords": [
     "homebridge-plugin"
