@@ -132,7 +132,7 @@ export class IRMQTTPlatformAccessory {
    * Handle "SET" requests from HomeKit
    * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
    */
-  async setActive(value: CharacteristicValue) {
+  private async setActive(value: CharacteristicValue) {
     // this.acstate.On = value as boolean;
     this.platform.log.debug('Set Characteristic On ->', value);
 
@@ -158,7 +158,7 @@ export class IRMQTTPlatformAccessory {
    * Handle the "GET" requests from HomeKit
    * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
    */
-  async getActive(): Promise<CharacteristicValue> {
+  private async getActive(): Promise<CharacteristicValue> {
     const isOn = this.acstate.On;
     this.platform.log.debug('Get Characteristic On ->', isOn);
     return isOn;
@@ -168,7 +168,7 @@ export class IRMQTTPlatformAccessory {
    * Handle the "GET" requests from HomeKit
    * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
    */
-  async handleCurrentHeaterCoolerStateGet(value: CharacteristicValue) {
+  private async handleCurrentHeaterCoolerStateGet(value: CharacteristicValue) {
     this.platform.log.debug('Set Characteristic CurrentHeaterCoolerState -> ', this.acstate.Mode);
     return this.acstate.Mode;
   }
@@ -176,7 +176,7 @@ export class IRMQTTPlatformAccessory {
    * Handle "SET" requests from HomeKit
    * These are sent when the user changes the state of an accessory, for example, changing the Mode
    */
-  async handleCurrentHeaterCoolerStateSet(value: CharacteristicValue) {
+  private async handleCurrentHeaterCoolerStateSet(value: CharacteristicValue) {
     this.publishMessage(this.mqttTopic["mode"], this.acstate.Mode === this.platform.Characteristic.CurrentHeaterCoolerState.COOLING ? "cool" : "auto");
     this.platform.log.debug('Set Characteristic CurrentHeaterCoolerState -> ', this.acstate.Mode);
 
@@ -186,7 +186,7 @@ export class IRMQTTPlatformAccessory {
    * Handle "SET" requests from HomeKit
    * These are sent when the user changes the state of an accessory, for example, changing the Mode
    */
-  async handleTargetHeaterCoolerStateSet(value: CharacteristicValue) {
+  private async handleTargetHeaterCoolerStateSet(value: CharacteristicValue) {
 
     if (value === this.platform.Characteristic.TargetHeaterCoolerState.AUTO) {
       this.publishMessage(this.mqttTopic["mode"], "auto");
@@ -204,7 +204,7 @@ export class IRMQTTPlatformAccessory {
    * Handle the "GET" requests from HomeKit
    * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
    */
-  async handleTargetHeaterCoolerStateGet(value: CharacteristicValue) {
+  private async handleTargetHeaterCoolerStateGet(value: CharacteristicValue) {
     this.platform.log.debug('Get Characteristic TargetHeaterCoolerState -> ', this.acstate.TargetMode);
 
     return this.acstate.TargetMode
@@ -213,7 +213,7 @@ export class IRMQTTPlatformAccessory {
    * Handle "SET" requests from HomeKit
    * These are sent when the user changes the state of an accessory, for example, changing the Mode
    */
-  async handleCurrentTemperatureGet(value: CharacteristicValue) {
+  private async handleCurrentTemperatureGet(value: CharacteristicValue) {
     this.platform.log.debug('Get Characteristic CurrentTemperature -> ', this.acstate.TargetTemp);
 
     return this.acstate.TargetTemp;
@@ -223,7 +223,7 @@ export class IRMQTTPlatformAccessory {
    * Handle the "GET" requests from HomeKit
    * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
    */
-  async handleCoolingThresholdTemperatureGet(value: CharacteristicValue) {
+  private async handleCoolingThresholdTemperatureGet(value: CharacteristicValue) {
     this.platform.log.debug('Get Characteristic TargetTemp -> ', this.acstate.TargetTemp);
     return this.acstate.TargetTemp;
   }
@@ -232,7 +232,7 @@ export class IRMQTTPlatformAccessory {
   * Handle "SET" requests from HomeKit
   * These are sent when the user changes the state of an accessory, for example, changing the Mode
   */
-  async handleCoolingThresholdTemperatureSet(value: CharacteristicValue) {
+  private async handleCoolingThresholdTemperatureSet(value: CharacteristicValue) {
     this.acstate.TargetTemp = this.acstate.CurrentTemp = value as number;
     this.publishMessage(this.mqttTopic["temp"], this.acstate.TargetTemp.toString());
     this.platform.log.debug('Set Characteristic TargetTemp -> ', this.acstate.TargetTemp);
@@ -243,7 +243,7 @@ export class IRMQTTPlatformAccessory {
    * Handle the "GET" requests from HomeKit
    * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
    */
-  async handleHeatingThresholdTemperatureGet(value: CharacteristicValue) {
+  private async handleHeatingThresholdTemperatureGet(value: CharacteristicValue) {
     this.platform.log.debug('Get Characteristic TargetTemp -> ', this.acstate.TargetTemp);
     return this.acstate.TargetTemp;
   }
@@ -252,7 +252,7 @@ export class IRMQTTPlatformAccessory {
   * Handle "SET" requests from HomeKit
   * These are sent when the user changes the state of an accessory, for example, changing the Mode
   */
-  async handleHeatingThresholdTemperatureSet(value: CharacteristicValue) {
+  private async handleHeatingThresholdTemperatureSet(value: CharacteristicValue) {
     this.acstate.TargetTemp = this.acstate.CurrentTemp = value as number;
     this.publishMessage(this.mqttTopic["temp"], this.acstate.TargetTemp.toString());
     this.platform.log.debug('Set Characteristic TargetTemp -> ', this.acstate.TargetTemp);
@@ -263,7 +263,7 @@ export class IRMQTTPlatformAccessory {
   * Handle "SET" requests from HomeKit
   * These are sent when the user changes the state of an accessory, for example, changing the Mode
   */
-  async handleRotationSpeedGet(value: CharacteristicValue) {
+  private async handleRotationSpeedGet(value: CharacteristicValue) {
     this.platform.log.debug('Get Characteristic rotationSpeed -> ', this.acstate.rotationSpeed);
     return this.acstate.rotationSpeed;
   }
@@ -272,7 +272,7 @@ export class IRMQTTPlatformAccessory {
   * Handle "SET" requests from HomeKit
   * These are sent when the user changes the state of an accessory, for example, changing the Mode
   */
-  async handleRotationSpeedSet(value: CharacteristicValue) {
+  private async handleRotationSpeedSet(value: CharacteristicValue) {
     const numericValue = typeof value === 'number' ? value : Number(value);
     let fanspeed = "auto";
     if (numericValue <= 100 && numericValue >= 75) {
@@ -292,7 +292,7 @@ export class IRMQTTPlatformAccessory {
    * Handle the "GET" requests from HomeKit
    * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
    */
-  async handleSwingModeGet(value: CharacteristicValue) {
+  private async handleSwingModeGet(value: CharacteristicValue) {
     this.platform.log.debug('Get Characteristic Swing -> ', this.acstate.Swing);
     return this.acstate.Swing;
   }
@@ -301,13 +301,13 @@ export class IRMQTTPlatformAccessory {
   * Handle "SET" requests from HomeKit
   * These are sent when the user changes the state of an accessory, for example, changing the Mode
   */
-  async handleSwingModeSet(value: CharacteristicValue) {
+  private async handleSwingModeSet(value: CharacteristicValue) {
     this.acstate.Swing = value as boolean;
     this.publishMessage(this.mqttTopic["swingv"], this.acstate.Swing ? "auto" : "off");
     this.platform.log.debug('Set Characteristic Swing -> ', this.acstate.Swing);
   }
 
-  mqttInit(accessory: PlatformAccessory, closed: boolean = false) {
+  private mqttInit(accessory: PlatformAccessory, closed: boolean = false) {
     if (this.isConnected() && !closed) {
       this.platform.log.debug('Already connected to MQTT broker, skipping connection.');
       return this.mqttClient;
@@ -328,10 +328,10 @@ export class IRMQTTPlatformAccessory {
     return mqttClient;
   }
 
-  isConnected(): boolean {
+  private isConnected(): boolean {
     return this.mqttClient !== undefined;
   }
-  async publishMessage(topic: string, payload: string) {
+  private async publishMessage(topic: string, payload: string) {
     if (this.accessory.context.device !== undefined) {
       topic = `${topic}`;
       let options: mqtt.IClientPublishOptions = { qos: 2, retain: true };
