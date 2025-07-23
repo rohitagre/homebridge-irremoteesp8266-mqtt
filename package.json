@@ -1,26 +1,25 @@
 {
   "name": "homebridge-irremoteesp8266-mqtt",
-  "displayName": "IRremoteESP8266 Companion",
-  "type": "module",
   "version": "1.0.1",
-  "description": "A short description about what your plugin does.",
-  "author": "Rohit Agre",
-  "license": "Apache-2.0",
+  "description": "Homebridge plugin to control IR devices using ESP8266 IRremoteESP8266 library and MQTT.",
+  "keywords": [
+    "homebridge-plugin"
+  ],
   "homepage": "https://github.com/rohitagre/homebridge-irremoteesp8266-mqtt#readme",
+  "bugs": {
+    "url": "https://github.com/rohitagre/homebridge-irremoteesp8266-mqtt/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/rohitagre/homebridge-irremoteesp8266-mqtt.git"
   },
-  "bugs": {
-    "url": "https://github.com/rohitagre/homebridge-irremoteesp8266-mqtt/issues"
-  },
-  "keywords": [
-    "homebridge-plugin"
-  ],
+  "license": "Apache-2.0",
+  "author": "Rohit Agre",
+  "type": "module",
   "main": "dist/index.js",
-  "engines": {
-    "node": "^18.20.4 || ^20.18.0 || ^22.10.0",
-    "homebridge": "^1.8.0 || ^2.0.0-beta.0"
+  "types": "./dist/index.d.ts",
+  "directories": {
+    "test": "test"
   },
   "scripts": {
     "build": "rimraf ./dist && tsc",
@@ -42,5 +41,10 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.24.1"
-  }
+  },
+  "engines": {
+    "node": "^18.20.4 || ^20.18.0 || ^22.10.0",
+    "homebridge": "^1.8.0 || ^2.0.0-beta.0"
+  },
+  "displayName": "IRremoteESP8266 Companion"
 }
