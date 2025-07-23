@@ -1,54 +1,34 @@
-<p align="center">
-
-<img src="https://github.com/homebridge/branding/raw/latest/logos/homebridge-wordmark-logo-vertical.png" width="150">
-
-</p>
-
 <span align="center">
 
-# Homebridge Platform Plugin Template
+# Homebridge Companion plugin for IRremoteESP8266
 
 </span>
 
-> [!IMPORTANT]
-> **Homebridge v2.0 Information**
->
-> This template currently has a
-> - `package.json -> engines.homebridge` value of `"^1.8.0 || ^2.0.0-beta.0"`
-> - `package.json -> devDependencies.homebridge` value of `"^2.0.0-beta.0"`
->
-> This is to ensure that your plugin will build and run on both Homebridge v1 and v2.
->
-> Once Homebridge v2.0 has been released, you can remove the `-beta.0` in both places.
+This plugin provides homebridge support form [IRremoteESP8266 library](https://github.com/crankyoldgit/IRremoteESP8266)
 
----
+To use your IRremote over MQTT and to homebridge using this plugin, you must have [This Arduino Sketch](https://github.com/crankyoldgit/IRremoteESP8266/blob/master/examples/IRMQTTServer/IRMQTTServer.ino) flashed to your ESP8266 device.
 
-This is a template Homebridge dynamic platform plugin and can be used as a base to help you get started developing your own plugin.
+### Configuration 
 
-This template should be used in conjunction with the [developer documentation](https://developers.homebridge.io/). A full list of all supported service types, and their characteristics is available on this site.
-
-### Clone As Template
-
-Click the link below to create a new GitHub Repository using this template, or click the *Use This Template* button above.
-
-<span align="center">
-
-### [Create New Repository From Template](https://github.com/homebridge/homebridge-plugin-template/generate)
-
-</span>
-
-### Setup Development Environment
-
-To develop Homebridge plugins you must have Node.js 18 or later installed, and a modern code editor such as [VS Code](https://code.visualstudio.com/). This plugin template uses [TypeScript](https://www.typescriptlang.org/) to make development easier and comes with pre-configured settings for [VS Code](https://code.visualstudio.com/) and ESLint. If you are using VS Code install these extensions:
-
-- [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint)
-
-### Install Development Dependencies
-
-Using a terminal, navigate to the project folder and run this command to install the development dependencies:
-
-```shell
-npm install
+```
+ "platforms": [
+    ...
+    {
+      "name": "homebridge-irremoteesp8266-mqtt",
+      "platform": "ESP8266 IR MQTT",
+      "serviceType": "HeaterCooler",
+      "devices": [
+        {
+          "name": "<Any>",
+          "displayName": "<Any>",
+          "UniqueId": "<Any>",
+          "mqtt": {
+            "server": "<MQTT Server:1883>",
+            "prefix": "<prefix for accessory>",
+            "username": "<username>",
+            "password": "<password>"
+          }
+        }
 ```
 
 ### Update package.json

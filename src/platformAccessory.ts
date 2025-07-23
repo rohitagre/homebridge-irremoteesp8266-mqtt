@@ -1,16 +1,15 @@
-import type { CharacteristicValue, Logging, PlatformAccessory, Service } from 'homebridge';
-import * as mqtt from "mqtt"
+import type { CharacteristicValue, Logging, PlatformAccessory, PlatformConfig, Service } from 'homebridge';
+import * as mqtt from "mqtt";
 import * as fs from "fs";
-// @ts-ignore
 import packageJson from '../package.json'  with { type: "json" };
 import type { IRMQTTHomebridgePlatform } from './platform.js';
-import { randomUUID } from 'crypto';
 
 /**
  * Platform Accessory
  * An instance of this class is created for each accessory your platform registers
  * Each accessory may expose multiple services of different service types.
  */
+
 export class IRMQTTPlatformAccessory {
   private service: Service;
 
@@ -18,38 +17,39 @@ export class IRMQTTPlatformAccessory {
    * These are just used to create a working example
    * You should implement your own code to track the state of your accessory
    */
-  private acstate = {
-    On: false,
-    Mode: 3, // 0: Off, 1: Heat, 2: Cool, 3: Auto, 4: Fan
-    TargetMode: 2,
-    TargetTemp: 22,
-    DefaultTemp: 24,
-    rotationSpeed: 1,
-    CurrentTemp: 22,
-    Swing: false, // 0: Off, 1: On
-  };
 
-  private mqttPrefix = "homebridge";
 
-  private mqttTopic = {
-    power: this.mqttPrefix + "/ac/cmnd/power",
-    mode: this.mqttPrefix + "/ac/cmnd/mode",
-    temp: this.mqttPrefix + "/ac/cmnd/temp",
-    fanspeed: this.mqttPrefix + "/ac/cmnd/fanspeed",
-    swingv: this.mqttPrefix + "/ac/cmnd/swingv",
-    light: this.mqttPrefix + "/ac/cmnd/light",
-    powerstat: this.mqttPrefix + "/ac/stat/power",
-    modestat: this.mqttPrefix + "/ac/stat/mode",
-    tempstat: this.mqttPrefix + "/ac/stat/temp",
-    fanspeedstat: this.mqttPrefix + "/ac/stat/fanspeed",
-    swingstat: this.mqttPrefix + "/ac/stat/swingv",
-    lightstat: this.mqttPrefix + "/ac/stat/light",
-  };
   private mqttClient: mqtt.MqttClient;
+
+  mqttTopic: {
+    power: string;
+    mode: string;
+    temp: string;
+    fanspeed: string;
+    swingv: string;
+    light: string;
+    powerstat: string;
+    modestat: string;
+    tempstat: string;
+    fanspeedstat: string;
+    swingstat: string;
+    lightstat: string;
+  };
+  mqttPrefix: string;
+  acstate: {
+    On: boolean;
+    Mode: number; // 0: Off, 1: Heat, 2: Cool, 3: Auto, 4: Fan
+    TargetMode: number;
+    TargetTemp: number;
+    DefaultTemp: number;
+    rotationSpeed: number;
+    CurrentTemp: number;
+    Swing: boolean;
+  };
 
   constructor(
     private readonly platform: IRMQTTHomebridgePlatform,
-    private readonly accessory: PlatformAccessory
+    private readonly accessory: PlatformAccessory,
   ) {
     // set accessory information
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
@@ -76,8 +76,8 @@ export class IRMQTTPlatformAccessory {
         validValues: [
           this.platform.Characteristic.CurrentHeaterCoolerState.INACTIVE,
           this.platform.Characteristic.CurrentHeaterCoolerState.IDLE,
-          this.platform.Characteristic.CurrentHeaterCoolerState.COOLING
-        ]
+          this.platform.Characteristic.CurrentHeaterCoolerState.COOLING,
+        ],
       });
 
     this.service.getCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState)
@@ -85,8 +85,8 @@ export class IRMQTTPlatformAccessory {
       .onSet(this.handleTargetHeaterCoolerStateSet.bind(this))
       .setProps({
         validValues: [
-          this.platform.Characteristic.TargetHeaterCoolerState.AUTO,
-          this.platform.Characteristic.TargetHeaterCoolerState.COOL]
+          this.platform.Characteristic.TargetHeaterCoolerState.COOL,
+        ],
       });
 
 
@@ -108,21 +108,42 @@ export class IRMQTTPlatformAccessory {
         minStep: 1,
       });
 
-    // this.service.addCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
-    //   .onGet(this.handleHeatingThresholdTemperatureGet.bind(this))
-    //   .onSet(this.handleHeatingThresholdTemperatureSet.bind(this))
-    //   .setProps({
-    //     minValue: 17,
-    //     maxValue: 30,
-    //     minStep: 1,
-    //   });
-
     this.service.getCharacteristic(this.platform.Characteristic.CurrentTemperature)
       .onGet(this.handleCurrentTemperatureGet.bind(this));
 
     this.service.getCharacteristic(this.platform.Characteristic.SwingMode)
       .onGet(this.handleSwingModeGet.bind(this))
       .onSet(this.handleSwingModeSet.bind(this));
+
+    this.acstate = {
+      On: false,
+      Mode: 3, // 0: Off, 1: Heat, 2: Cool, 3: Auto, 4: Fan
+      TargetMode: 2,
+      TargetTemp: 22,
+      DefaultTemp: 24,
+      rotationSpeed: 1,
+      CurrentTemp: 22,
+      Swing: false, // 0: Off, 1: On
+    };
+    this.mqttPrefix = accessory.context.device.mqtt.prefix;
+
+    this.mqttTopic = {
+      power: this.mqttPrefix + "/ac/cmnd/power",
+      mode: this.mqttPrefix + "/ac/cmnd/mode",
+      temp: this.mqttPrefix + "/ac/cmnd/temp",
+      fanspeed: this.mqttPrefix + "/ac/cmnd/fanspeed",
+      swingv: this.mqttPrefix + "/ac/cmnd/swingv",
+      light: this.mqttPrefix + "/ac/cmnd/light",
+      powerstat: this.mqttPrefix + "/ac/stat/power",
+      modestat: this.mqttPrefix + "/ac/stat/mode",
+      tempstat: this.mqttPrefix + "/ac/stat/temp",
+      fanspeedstat: this.mqttPrefix + "/ac/stat/fanspeed",
+      swingstat: this.mqttPrefix + "/ac/stat/swingv",
+      lightstat: this.mqttPrefix + "/ac/stat/light",
+    };
+    this.platform.log.info(`Using MQTT prefix: '${this.mqttPrefix}'`);
+
+    this.platform.log.debug(JSON.stringify(this.mqttTopic));
 
     this.mqttClient = this.mqttInit(accessory);
 
@@ -133,22 +154,22 @@ export class IRMQTTPlatformAccessory {
    * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
    */
   private async setActive(value: CharacteristicValue) {
-    // this.acstate.On = value as boolean;
-    this.platform.log.debug('Set Characteristic On ->', value);
+    this.acstate.On = value as boolean;
+    this.platform.log.debug(this.accessory.displayName, 'Set Characteristic On ->', value);
 
 
-    if (value == this.platform.Characteristic.Active.INACTIVE) {
-      this.publishMessage(this.mqttTopic["power"], "off");
-      this.publishMessage(this.mqttTopic["swingv"], "off");
+    if (value === this.platform.Characteristic.Active.INACTIVE) {
+      this.publishMessage(this.mqttTopic.power, "off");
+      this.publishMessage(this.mqttTopic.swingv, "off");
       this.acstate.On = this.platform.Characteristic.Active.INACTIVE as unknown as boolean;
       this.acstate.Mode = this.platform.Characteristic.CurrentHeaterCoolerState.INACTIVE;
     } else {
-      if ((this.acstate.Mode == this.platform.Characteristic.CurrentHeaterCoolerState.INACTIVE)) {
+      if ((this.acstate.Mode === this.platform.Characteristic.CurrentHeaterCoolerState.INACTIVE)) {
         this.acstate.Mode = this.platform.Characteristic.CurrentHeaterCoolerState.COOLING;
         this.acstate.TargetMode = this.platform.Characteristic.TargetHeaterCoolerState.COOL;
       }
-      this.publishMessage(this.mqttTopic["power"], "on");
-      this.publishMessage(this.mqttTopic["mode"], this.acstate.Mode === this.platform.Characteristic.CurrentHeaterCoolerState.COOLING ? "cool" : "auto");
+      this.publishMessage(this.mqttTopic.power, "on");
+      this.publishMessage(this.mqttTopic.mode, this.acstate.Mode === this.platform.Characteristic.CurrentHeaterCoolerState.COOLING ? "cool" : "auto");
       this.acstate.TargetTemp = this.acstate.CurrentTemp = this.acstate.DefaultTemp as number;
 
     }
@@ -160,7 +181,7 @@ export class IRMQTTPlatformAccessory {
    */
   private async getActive(): Promise<CharacteristicValue> {
     const isOn = this.acstate.On;
-    this.platform.log.debug('Get Characteristic On ->', isOn);
+    this.platform.log.debug(this.accessory.displayName, 'Get Characteristic On -> ', isOn);
     return isOn;
   }
 
@@ -168,17 +189,17 @@ export class IRMQTTPlatformAccessory {
    * Handle the "GET" requests from HomeKit
    * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
    */
-  private async handleCurrentHeaterCoolerStateGet(value: CharacteristicValue) {
-    this.platform.log.debug('Set Characteristic CurrentHeaterCoolerState -> ', this.acstate.Mode);
+  private async handleCurrentHeaterCoolerStateGet() {
+    this.platform.log.debug(this.accessory.displayName, 'Set Characteristic CurrentHeaterCoolerState -> ', this.acstate.Mode);
     return this.acstate.Mode;
   }
   /**
    * Handle "SET" requests from HomeKit
    * These are sent when the user changes the state of an accessory, for example, changing the Mode
    */
-  private async handleCurrentHeaterCoolerStateSet(value: CharacteristicValue) {
-    this.publishMessage(this.mqttTopic["mode"], this.acstate.Mode === this.platform.Characteristic.CurrentHeaterCoolerState.COOLING ? "cool" : "auto");
-    this.platform.log.debug('Set Characteristic CurrentHeaterCoolerState -> ', this.acstate.Mode);
+  private async handleCurrentHeaterCoolerStateSet() {
+    this.publishMessage(this.mqttTopic.mode, this.acstate.Mode === this.platform.Characteristic.CurrentHeaterCoolerState.COOLING ? "cool" : "auto");
+    this.platform.log.debug(this.accessory.displayName, 'Set Characteristic CurrentHeaterCoolerState -> ', this.acstate.Mode);
 
   }
 
@@ -189,32 +210,31 @@ export class IRMQTTPlatformAccessory {
   private async handleTargetHeaterCoolerStateSet(value: CharacteristicValue) {
 
     if (value === this.platform.Characteristic.TargetHeaterCoolerState.AUTO) {
-      this.publishMessage(this.mqttTopic["mode"], "auto");
-    }
-    else if (value === this.platform.Characteristic.TargetHeaterCoolerState.COOL) {
-      this.publishMessage(this.mqttTopic["mode"], "cool");
+      this.publishMessage(this.mqttTopic.mode, "auto");
+    } else if (value === this.platform.Characteristic.TargetHeaterCoolerState.COOL) {
+      this.publishMessage(this.mqttTopic.mode, "cool");
     }
 
     this.acstate.Mode = this.platform.Characteristic.CurrentHeaterCoolerState.COOLING;
     this.acstate.TargetMode = this.platform.Characteristic.TargetHeaterCoolerState.COOL;
-    this.platform.log.debug('Set Characteristic TargetHeaterCoolerState -> ', this.acstate.TargetMode);
+    this.platform.log.debug(this.accessory.displayName, 'Set Characteristic TargetHeaterCoolerState -> ', this.acstate.TargetMode);
   }
 
   /**
    * Handle the "GET" requests from HomeKit
    * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
    */
-  private async handleTargetHeaterCoolerStateGet(value: CharacteristicValue) {
-    this.platform.log.debug('Get Characteristic TargetHeaterCoolerState -> ', this.acstate.TargetMode);
+  private async handleTargetHeaterCoolerStateGet() {
+    this.platform.log.debug(this.accessory.displayName, 'Get Characteristic TargetHeaterCoolerState -> ', this.acstate.TargetMode);
 
-    return this.acstate.TargetMode
+    return this.acstate.TargetMode;
   }
   /**
    * Handle "SET" requests from HomeKit
    * These are sent when the user changes the state of an accessory, for example, changing the Mode
    */
-  private async handleCurrentTemperatureGet(value: CharacteristicValue) {
-    this.platform.log.debug('Get Characteristic CurrentTemperature -> ', this.acstate.TargetTemp);
+  private async handleCurrentTemperatureGet() {
+    this.platform.log.debug(this.accessory.displayName, 'Get Characteristic CurrentTemperature -> ', this.acstate.TargetTemp);
 
     return this.acstate.TargetTemp;
   }
@@ -223,8 +243,8 @@ export class IRMQTTPlatformAccessory {
    * Handle the "GET" requests from HomeKit
    * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
    */
-  private async handleCoolingThresholdTemperatureGet(value: CharacteristicValue) {
-    this.platform.log.debug('Get Characteristic TargetTemp -> ', this.acstate.TargetTemp);
+  private async handleCoolingThresholdTemperatureGet() {
+    this.platform.log.debug(this.accessory.displayName, 'Get Characteristic TargetTemp -> ', this.acstate.TargetTemp);
     return this.acstate.TargetTemp;
   }
 
@@ -234,37 +254,16 @@ export class IRMQTTPlatformAccessory {
   */
   private async handleCoolingThresholdTemperatureSet(value: CharacteristicValue) {
     this.acstate.TargetTemp = this.acstate.CurrentTemp = value as number;
-    this.publishMessage(this.mqttTopic["temp"], this.acstate.TargetTemp.toString());
-    this.platform.log.debug('Set Characteristic TargetTemp -> ', this.acstate.TargetTemp);
+    this.publishMessage(this.mqttTopic.temp, this.acstate.TargetTemp.toString());
+    this.platform.log.debug(this.accessory.displayName, 'Set Characteristic TargetTemp -> ', this.acstate.TargetTemp);
 
   }
-
-  /**
-   * Handle the "GET" requests from HomeKit
-   * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
-   */
-  private async handleHeatingThresholdTemperatureGet(value: CharacteristicValue) {
-    this.platform.log.debug('Get Characteristic TargetTemp -> ', this.acstate.TargetTemp);
-    return this.acstate.TargetTemp;
-  }
-
   /**
   * Handle "SET" requests from HomeKit
   * These are sent when the user changes the state of an accessory, for example, changing the Mode
   */
-  private async handleHeatingThresholdTemperatureSet(value: CharacteristicValue) {
-    this.acstate.TargetTemp = this.acstate.CurrentTemp = value as number;
-    this.publishMessage(this.mqttTopic["temp"], this.acstate.TargetTemp.toString());
-    this.platform.log.debug('Set Characteristic TargetTemp -> ', this.acstate.TargetTemp);
-
-  }
-
-  /**
-  * Handle "SET" requests from HomeKit
-  * These are sent when the user changes the state of an accessory, for example, changing the Mode
-  */
-  private async handleRotationSpeedGet(value: CharacteristicValue) {
-    this.platform.log.debug('Get Characteristic rotationSpeed -> ', this.acstate.rotationSpeed);
+  private async handleRotationSpeedGet() {
+    this.platform.log.debug(this.accessory.displayName, 'Get Characteristic rotationSpeed -> ', this.acstate.rotationSpeed);
     return this.acstate.rotationSpeed;
   }
 
@@ -282,8 +281,8 @@ export class IRMQTTPlatformAccessory {
     } else if (numericValue < 50 && numericValue >= 25) {
       fanspeed = "min";
     }
-    this.publishMessage(this.mqttTopic["fanspeed"], fanspeed);
-    this.platform.log.debug('Set Characteristic Mode -> ', numericValue);
+    this.publishMessage(this.mqttTopic.fanspeed, fanspeed);
+    this.platform.log.debug(this.accessory.displayName, 'Set Characteristic Mode -> ', numericValue);
 
   }
 
@@ -292,8 +291,8 @@ export class IRMQTTPlatformAccessory {
    * Handle the "GET" requests from HomeKit
    * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
    */
-  private async handleSwingModeGet(value: CharacteristicValue) {
-    this.platform.log.debug('Get Characteristic Swing -> ', this.acstate.Swing);
+  private async handleSwingModeGet() {
+    this.platform.log.debug(this.accessory.displayName, 'Get Characteristic Swing -> ', this.acstate.Swing);
     return this.acstate.Swing;
   }
 
@@ -303,8 +302,8 @@ export class IRMQTTPlatformAccessory {
   */
   private async handleSwingModeSet(value: CharacteristicValue) {
     this.acstate.Swing = value as boolean;
-    this.publishMessage(this.mqttTopic["swingv"], this.acstate.Swing ? "auto" : "off");
-    this.platform.log.debug('Set Characteristic Swing -> ', this.acstate.Swing);
+    this.publishMessage(this.mqttTopic.swingv, this.acstate.Swing ? "auto" : "off");
+    this.platform.log.debug(this.accessory.displayName, 'Set Characteristic Swing -> ', this.acstate.Swing);
   }
 
   private mqttInit(accessory: PlatformAccessory, closed: boolean = false) {
@@ -318,7 +317,6 @@ export class IRMQTTPlatformAccessory {
     const options: mqtt.IClientOptions = IRMQTTPlatformAccessory.createMqttOptions(this.platform.log, accessory.context.device);
 
     const mqttClient: mqtt.MqttClient = mqtt.connect("mqtt://" + accessory.context.device.mqtt.server, options);
-    this.mqttPrefix = accessory.context.device.mqtt.prefix || 'homebridge';
 
     mqttClient.on('connect', this.onMqttConnected.bind(this));
     mqttClient.on('close', this.onMqttClose.bind(this));
@@ -334,7 +332,7 @@ export class IRMQTTPlatformAccessory {
   private async publishMessage(topic: string, payload: string) {
     if (this.accessory.context.device !== undefined) {
       topic = `${topic}`;
-      let options: mqtt.IClientPublishOptions = { qos: 2, retain: true };
+      const options: mqtt.IClientPublishOptions = { qos: 2, retain: true };
       if (!this.isConnected) {
         this.platform.log.error('Not connected to MQTT server!');
         this.platform.log.error(`Cannot send message to '${topic}': '${payload}`);
@@ -349,7 +347,7 @@ export class IRMQTTPlatformAccessory {
     }
   }
 
-  private static createMqttOptions(log: Logging, config: any): mqtt.IClientOptions {
+  private static createMqttOptions(log: Logging, config: PlatformConfig): mqtt.IClientOptions {
     const options: mqtt.IClientOptions = {};
     if (config.mqtt.version) {
       options.protocolVersion = config.mqtt.version;
@@ -397,8 +395,6 @@ export class IRMQTTPlatformAccessory {
   private onMqttClose(): void {
     this.platform.log.error('Disconnected from MQTT server!');
   }
-
-  // eslint-disable-next-line sonarjs/cognitive-complexity
   private onMessage(topic: string, message: string) {
     const fullTopic = topic;
     message = message.toLowerCase();
@@ -410,43 +406,39 @@ export class IRMQTTPlatformAccessory {
         return;
       }
 
-      if (topic == this.mqttTopic["powerstat"]) {
-        const value = message == "on" ? true : false;
+      if (topic === this.mqttTopic.powerstat) {
+        const value = message === "on" ? true : false;
         this.platform.log.debug(`Received power state update: ${value}`);
         this.acstate.On = value;
-      }
-      else if (topic == this.mqttTopic["tempstat"]) {
+      } else if (topic === this.mqttTopic.tempstat) {
         const value = parseInt(message);
         this.acstate.TargetTemp = this.acstate.CurrentTemp = value;
-      }
-      else if (topic == this.mqttTopic["swingstat"]) {
-        const value = message == "auto" ? true : false;
+      } else if (topic === this.mqttTopic.swingstat) {
+        const value = message === "auto" ? true : false;
         this.acstate.Swing = value;
-      }
-      else if (topic == this.mqttTopic["fanspeedstat"]) {
+      } else if (topic === this.mqttTopic.fanspeedstat) {
         const value = message;
         let fanspeed = 100;
-        if (value == "auto") {
+        if (value === "auto") {
           fanspeed = 100;
-        } else if (value == "min") {
+        } else if (value === "min") {
           fanspeed = 25;
-        } else if (value == "medium") {
+        } else if (value === "medium") {
           fanspeed = 50;
-        } else if (value == "max") {
+        } else if (value === "max") {
           fanspeed = 75;
         }
         this.acstate.rotationSpeed = fanspeed;
-      }
-      else if (topic == this.mqttTopic["modestat"]) {
+      } else if (topic === this.mqttTopic.modestat) {
         const value = message;
-        let mode: CharacteristicValue = 0,
-          TargetMode: CharacteristicValue = 0;
-        if (value == "auto") {
+        let mode: CharacteristicValue = 3,
+          TargetMode: CharacteristicValue = 2;
+        if (value === "auto") {
           mode = this.platform.Characteristic.TargetHeaterCoolerState.AUTO;
-        } else if (value == "cool") {
+        } else if (value === "cool") {
           mode = this.platform.Characteristic.CurrentHeaterCoolerState.COOLING;
           TargetMode = this.platform.Characteristic.TargetHeaterCoolerState.COOL;
-        } else if (value == "off") {
+        } else if (value === "off") {
           mode = this.platform.Characteristic.CurrentHeaterCoolerState.INACTIVE;
         } else {
           TargetMode = this.platform.Characteristic.TargetHeaterCoolerState.AUTO;
@@ -455,9 +447,9 @@ export class IRMQTTPlatformAccessory {
         this.acstate.TargetMode = TargetMode as number;
       }
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       this.platform.log.error(`Failed to process MQTT message on '${fullTopic}'. (Maybe check the MQTT version?)`);
-      this.platform.log.error(err);
+      this.platform.log.error(String(err));
     }
   }
 

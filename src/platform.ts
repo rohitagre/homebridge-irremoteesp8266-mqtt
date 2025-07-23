@@ -17,8 +17,7 @@ export class IRMQTTHomebridgePlatform implements DynamicPlatformPlugin {
   public readonly discoveredCacheUUIDs: string[] = [];
 
   // This is only required when using Custom Services and Characteristics not support by HomeKit
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-
+  
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   public readonly CustomCharacteristics: any;
 

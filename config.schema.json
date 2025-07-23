@@ -9,46 +9,78 @@
       "name": {
         "title": "Name",
         "type": "string",
+        "description": "The name of the platform. This is used to identify the platform in Homebridge.",
         "required": true,
         "default": "AC"
       },
-      "accessory": {
-        "title": "Accessory",
-        "type": "string",
-        "required": true,
-        "default": "ircompanion"
-      },
+
       "serviceType": {
         "title": "Service Type",
+        "required": true,
+        "type": "string",
+        "default": "HeaterCooler",
+        "description": "The type of service to create for the device. This can be 'HeaterCooler'"
+      },
+      "platform": {
+        "title": "Platform",
         "type": "string",
         "required": true,
-        "default": "HeaterCooler"
+        "default": "ESP8266 IR MQTT",
+        "description": "The platform name for the plugin. This should match 'ESP8266 IR MQTT'."
       },
-      "mqtt": {
-        "title": "MQTT Settings",
+      "devices": {
         "type": "array",
         "items": {
-          "server": {
-            "title": "Server",
-            "type": "string",
-            "required": true,
-            "default": "localhost:1883"
-          },
-          "username": {
-            "title": "MQTT username",
-            "type": "string",
-            "default": "admin"
-          },
-          "password": {
-            "title": "MQTT Password",
-            "type": "string",
-            "default": ""
-          },
-          "prefix": {
-            "title": "Service Prefix",
-            "type": "string",
-            "required": true,
-            "default": "ir_remote"
+          "title": "ACs",
+          "type": "object",
+          "properties": {
+            "UniqueId": {
+              "title": "Unique ID",
+              "type": "string",
+              "description": "Unique ID for the device. This is used to identify the device in Homebridge.",
+              "required": true
+            },
+            "displayName": {
+              "title": "Display Name",
+              "type": "string",
+              "description": "Name of the device as it will appear in Homebridge.",
+              "required": true,
+              "default": "LG AC"
+            },
+            "mqtt": {
+              "title": "MQTT Settings",
+              "type": "object",
+              "properties": {
+                "server": {
+                  "title": "Server",
+                  "type": "string",
+                  "description": "MQTT server address. This is usually in the format 'hostname:port'.",
+                  "required": true,
+                  "default": "localhost:1883"
+                },
+                "username": {
+                  "title": "MQTT username",
+                  "type": "string",
+                  "required": false,
+                  "description": "Username for MQTT authentication. Leave empty if not required.",
+                  "default": ""
+                },
+                "password": {
+                  "title": "MQTT Password",
+                  "type": "string",
+                  "description": "Password for MQTT authentication. Leave empty if not required.",
+                  "required": false,
+                  "default": ""
+                },
+                "prefix": {
+                  "title": "Service Prefix",
+                  "type": "string",
+                  "description": "Prefix for MQTT topics. This is used to identify the device in MQTT messages.",
+                  "required": true,
+                  "default": "ir_remote"
+                }
+              }
+            }
           }
         }
       }

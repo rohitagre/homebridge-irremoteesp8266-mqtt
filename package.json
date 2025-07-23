@@ -3,14 +3,13 @@
   "displayName": "IRremoteESP8266 Companion",
   "type": "module",
   "version": "1.0.1",
-  "private": true,
   "description": "A short description about what your plugin does.",
   "author": "Rohit Agre",
   "license": "Apache-2.0",
   "homepage": "https://github.com/rohitagre/homebridge-irremoteesp8266-mqtt#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/rohitagre/homebridge-irremoteesp8266-mqtt.git"
+    "url": "git+https://github.com/rohitagre/homebridge-irremoteesp8266-mqtt.git"
   },
   "bugs": {
     "url": "https://github.com/rohitagre/homebridge-irremoteesp8266-mqtt/issues"
