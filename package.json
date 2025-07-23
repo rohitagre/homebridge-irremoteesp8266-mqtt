@@ -2,7 +2,7 @@
   "name": "homebridge-irremoteesp8266-mqtt",
   "displayName": "IRremoteESP8266 Companion",
   "type": "module",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "A short description about what your plugin does.",
   "author": "Rohit Agre",
