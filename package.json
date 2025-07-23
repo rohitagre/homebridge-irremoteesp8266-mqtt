@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "A short description about what your plugin does.",
-  "author": "Your Name",
+  "author": "Rohit Agre",
   "license": "Apache-2.0",
   "homepage": "https://github.com/rohitagre/homebridge-irremoteesp8266-mqtt#readme",
   "repository": {
@@ -30,12 +30,13 @@
     "watch": "npm run build && npm link && nodemon"
   },
   "dependencies": {
-    "homebridge-lib": "^7.1.4"
+    "homebridge-lib": "^7.1.4",
+    "mqtt": "^5.13.3"
   },
   "devDependencies": {
-    "@eslint/js": "^9.21.0",
-    "@types/node": "^22.13.5",
-    "eslint": "^9.21.0",
+    "@eslint/js": "^9.31.0",
+    "@types/node": "^24.0.15",
+    "eslint": "^9.31.0",
     "homebridge": "^2.0.0-beta.0",
     "nodemon": "^3.1.9",
     "rimraf": "^6.0.1",
