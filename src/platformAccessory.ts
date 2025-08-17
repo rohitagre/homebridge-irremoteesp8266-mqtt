@@ -168,9 +168,10 @@ export class IRMQTTPlatformAccessory {
         this.acstate.Mode = this.platform.Characteristic.CurrentHeaterCoolerState.COOLING;
         this.acstate.TargetMode = this.platform.Characteristic.TargetHeaterCoolerState.COOL;
       }
+      this.acstate.TargetTemp = this.acstate.CurrentTemp = this.acstate.DefaultTemp as number;
       this.publishMessage(this.mqttTopic.power, "on");
       this.publishMessage(this.mqttTopic.mode, this.acstate.Mode === this.platform.Characteristic.CurrentHeaterCoolerState.COOLING ? "cool" : "auto");
-      this.acstate.TargetTemp = this.acstate.CurrentTemp = this.acstate.DefaultTemp as number;
+      // this.acstate.TargetTemp = this.acstate.CurrentTemp = this.acstate.DefaultTemp as number;
 
     }
   }
