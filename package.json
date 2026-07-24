@@ -28,23 +28,23 @@
     "watch": "npm run build && npm link && nodemon"
   },
   "dependencies": {
-    "homebridge-lib": "^7.1.4",
+    "homebridge-lib": "^8.0.1",
     "mqtt": "^5.13.3"
   },
   "devDependencies": {
-    "@eslint/js": "^9.31.0",
-    "@types/node": "^24.0.15",
-    "eslint": "^9.31.0",
-    "homebridge": "^2.0.0-beta.0",
-    "nodemon": "^3.1.9",
-    "rimraf": "^6.0.1",
+    "@eslint/js": "^10.0.0",
+    "@types/node": "^25.6.0",
+    "eslint": "^10.3.0",
+    "homebridge": "^2.0.0",
+    "nodemon": "^3.1.14",
+    "rimraf": "^6.1.3",
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.3",
-    "typescript-eslint": "^8.24.1"
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.2"
   },
   "engines": {
-    "node": "^18.20.4 || ^20.18.0 || ^22.10.0 || ^24.10.0",
-    "homebridge": "^1.8.0 || ^2.0.0-beta.0"
+    "node": "^22.10.0 || ^24.0.0",
+    "homebridge": "^1.8.0 || ^2.0.0"
   },
   "displayName": "IRremoteESP8266 Companion"
 }

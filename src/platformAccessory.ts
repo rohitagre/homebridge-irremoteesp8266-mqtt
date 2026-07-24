@@ -12,6 +12,8 @@ import type { IRMQTTHomebridgePlatform } from './platform.js';
 
 export class IRMQTTPlatformAccessory {
   private service: Service;
+  private turboService: Service;
+  private comfortService: Service;
 
   /**
    * These are just used to create a working example
@@ -27,12 +29,14 @@ export class IRMQTTPlatformAccessory {
     temp: string;
     fanspeed: string;
     swingv: string;
+    turbo: string;
     light: string;
     powerstat: string;
     modestat: string;
     tempstat: string;
     fanspeedstat: string;
     swingstat: string;
+    turbostat: string;
     lightstat: string;
   };
   mqttPrefix: string;
@@ -45,6 +49,8 @@ export class IRMQTTPlatformAccessory {
     rotationSpeed: number;
     CurrentTemp: number;
     Swing: boolean;
+    Turbo: boolean;
+    LowFanPreset: boolean;
   };
 
   constructor(
@@ -90,6 +96,9 @@ export class IRMQTTPlatformAccessory {
       });
 
 
+    this.service.addOptionalCharacteristic(this.platform.Characteristic.RotationSpeed);
+    this.service.addOptionalCharacteristic(this.platform.Characteristic.SwingMode);
+
     this.service.getCharacteristic(this.platform.Characteristic.RotationSpeed)
       .onGet(this.handleRotationSpeedGet.bind(this))
       .onSet(this.handleRotationSpeedSet.bind(this))
@@ -115,6 +124,20 @@ export class IRMQTTPlatformAccessory {
       .onGet(this.handleSwingModeGet.bind(this))
       .onSet(this.handleSwingModeSet.bind(this));
 
+    this.turboService = this.accessory.services.find(service => service.subtype === 'turbo')
+      || this.accessory.addService(this.platform.Service.Switch, 'Turbo Mode', 'turbo');
+    this.turboService.setCharacteristic(this.platform.Characteristic.Name, 'Turbo Mode');
+    this.turboService.getCharacteristic(this.platform.Characteristic.On)
+      .onGet(() => this.acstate.Turbo)
+      .onSet(this.handleTurboSet.bind(this));
+
+    this.comfortService = this.accessory.services.find(service => service.subtype === 'low-fan-preset')
+      || this.accessory.addService(this.platform.Service.Switch, 'Low Fan Preset', 'low-fan-preset');
+    this.comfortService.setCharacteristic(this.platform.Characteristic.Name, 'Low Fan Preset');
+    this.comfortService.getCharacteristic(this.platform.Characteristic.On)
+      .onGet(() => this.acstate.LowFanPreset)
+      .onSet(this.handleLowFanPresetSet.bind(this));
+
     this.acstate = {
       On: false,
       Mode: 3, // 0: Off, 1: Heat, 2: Cool, 3: Auto, 4: Fan
@@ -124,6 +147,8 @@ export class IRMQTTPlatformAccessory {
       rotationSpeed: 1,
       CurrentTemp: 22,
       Swing: false, // 0: Off, 1: On
+      Turbo: false,
+      LowFanPreset: false,
     };
     this.mqttPrefix = accessory.context.device.mqtt.prefix;
 
@@ -133,12 +158,14 @@ export class IRMQTTPlatformAccessory {
       temp: this.mqttPrefix + "/ac/cmnd/temp",
       fanspeed: this.mqttPrefix + "/ac/cmnd/fanspeed",
       swingv: this.mqttPrefix + "/ac/cmnd/swingv",
+      turbo: this.mqttPrefix + "/ac/cmnd/turbo",
       light: this.mqttPrefix + "/ac/cmnd/light",
       powerstat: this.mqttPrefix + "/ac/stat/power",
       modestat: this.mqttPrefix + "/ac/stat/mode",
       tempstat: this.mqttPrefix + "/ac/stat/temp",
       fanspeedstat: this.mqttPrefix + "/ac/stat/fanspeed",
       swingstat: this.mqttPrefix + "/ac/stat/swingv",
+      turbostat: this.mqttPrefix + "/ac/stat/turbo",
       lightstat: this.mqttPrefix + "/ac/stat/light",
     };
     this.platform.log.info(`Using MQTT prefix: '${this.mqttPrefix}'`);
@@ -313,6 +340,24 @@ export class IRMQTTPlatformAccessory {
     this.platform.log.debug(this.accessory.displayName, 'Set Characteristic Swing -> ', this.acstate.Swing);
   }
 
+  private async handleTurboSet(value: CharacteristicValue) {
+    this.acstate.Turbo = value as boolean;
+    this.publishMessage(this.mqttTopic.turbo, this.acstate.Turbo ? "on" : "off");
+    this.platform.log.debug(this.accessory.displayName, 'Set Turbo Mode -> ', this.acstate.Turbo);
+  }
+
+  private async handleLowFanPresetSet(value: CharacteristicValue) {
+    this.acstate.LowFanPreset = value as boolean;
+    if (this.acstate.LowFanPreset) {
+      this.publishMessage(this.mqttTopic.fanspeed, "min");
+      this.publishMessage(this.mqttTopic.swingv, "lowest");
+      this.publishMessage(this.mqttTopic.temp, "27");
+      this.acstate.rotationSpeed = 25;
+      this.acstate.TargetTemp = this.acstate.CurrentTemp = 27;
+    }
+    this.platform.log.debug(this.accessory.displayName, 'Set Low Fan Preset -> ', this.acstate.LowFanPreset);
+  }
+
   private mqttInit(accessory: PlatformAccessory, closed: boolean = false) {
     if (this.isConnected() && !closed) {
       this.platform.log.debug('Already connected to MQTT broker, skipping connection.');
@@ -323,7 +368,8 @@ export class IRMQTTPlatformAccessory {
 
     const options: mqtt.IClientOptions = IRMQTTPlatformAccessory.createMqttOptions(this.platform.log, accessory.context.device);
 
-    const mqttClient: mqtt.MqttClient = mqtt.connect("mqtt://" + accessory.context.device.mqtt.server, options);
+    const protocol = accessory.context.device.mqtt.tls ? "mqtts://" : "mqtt://";
+    const mqttClient: mqtt.MqttClient = mqtt.connect(protocol + accessory.context.device.mqtt.server, options);
 
     mqttClient.on('connect', this.onMqttConnected.bind(this));
     mqttClient.on('close', this.onMqttClose.bind(this));
@@ -358,7 +404,14 @@ export class IRMQTTPlatformAccessory {
   }
 
   private static createMqttOptions(log: Logging, config: PlatformConfig): mqtt.IClientOptions {
-    const options: mqtt.IClientOptions = {};
+    const options: mqtt.IClientOptions = {
+      // Send MQTT PINGREQ packets regularly and keep retrying after a
+      // temporary broker or network failure. mqtt.connect() otherwise uses
+      // the library defaults, which can be changed by a dependency upgrade.
+      keepalive: config.mqtt.keepalive ?? 60,
+      reconnectPeriod: 5000,
+      connectTimeout: 30000,
+    };
     if (config.mqtt.version) {
       options.protocolVersion = config.mqtt.version;
     }
@@ -399,7 +452,7 @@ export class IRMQTTPlatformAccessory {
   }
 
   private onMqttConnected(): void {
-    this.platform.log.info('Connected to MQTT server');
+    this.platform.log.info('Connected to MQTT server', this.accessory.context.device.mqtt.server, this.accessory.context.device.mqtt.prefix);
   }
 
   private onMqttClose(): void {
@@ -435,9 +488,13 @@ export class IRMQTTPlatformAccessory {
         this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, value);
         this.service.updateCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, value);
       } else if (topic === this.mqttTopic.swingstat) {
-        const value = message === "auto" ? true : false;
+        const value = message !== "off";
         this.acstate.Swing = value;
         this.service.updateCharacteristic(this.platform.Characteristic.SwingMode, value);
+      } else if (topic === this.mqttTopic.turbostat) {
+        const value = message === "on";
+        this.acstate.Turbo = value;
+        this.turboService.updateCharacteristic(this.platform.Characteristic.On, value);
       } else if (topic === this.mqttTopic.fanspeedstat) {
         const value = message;
         let fanspeed = 100;

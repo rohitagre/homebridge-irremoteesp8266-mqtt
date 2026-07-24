@@ -18,7 +18,7 @@ export class IRMQTTHomebridgePlatform implements DynamicPlatformPlugin {
   private readonly accessoryHandlers: IRMQTTPlatformAccessory[] = [];
 
   // This is only required when using Custom Services and Characteristics not support by HomeKit
-  
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   public readonly CustomCharacteristics: any;
 
@@ -119,6 +119,7 @@ export class IRMQTTHomebridgePlatform implements DynamicPlatformPlugin {
 
         // create the accessory handler for the newly create accessory
         // this is imported from `platformAccessory.ts`
+        console.log(accessory);
         this.accessoryHandlers.push(new IRMQTTPlatformAccessory(this, accessory));
 
         // link the accessory to your platform
