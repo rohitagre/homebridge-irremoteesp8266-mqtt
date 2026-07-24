@@ -2,7 +2,7 @@
   "pluginAlias": "ESP8266 IR MQTT",
   "pluginType": "platform",
   "singular": true,
-  "strictValidation": false,
+  "strictValidation": true,
   "schema": {
     "type": "object",
     "properties": {
@@ -29,7 +29,9 @@
         "description": "The platform name for the plugin. This should match 'ESP8266 IR MQTT'."
       },
       "devices": {
+        "required": true,
         "type": "array",
+        "minItems": 1,
         "items": {
           "title": "ACs",
           "type": "object",
@@ -79,9 +81,11 @@
                   "required": true,
                   "default": "ir_remote"
                 }
-              }
+              },
+              "required": ["server", "prefix"]
             }
-          }
+          },
+          "required": ["UniqueId", "displayName", "mqtt"]
         }
       }
     }

@@ -15,6 +15,7 @@ export class IRMQTTHomebridgePlatform implements DynamicPlatformPlugin {
   // this is used to track restored cached accessories
   public readonly accessories: Map<string, PlatformAccessory> = new Map();
   public readonly discoveredCacheUUIDs: string[] = [];
+  private readonly accessoryHandlers: IRMQTTPlatformAccessory[] = [];
 
   // This is only required when using Custom Services and Characteristics not support by HomeKit
   
@@ -40,6 +41,12 @@ export class IRMQTTHomebridgePlatform implements DynamicPlatformPlugin {
       // run the method to discover / register your devices as accessories
       this.discoverDevices();
     });
+
+    this.api.on('shutdown', () => {
+      for (const handler of this.accessoryHandlers) {
+        handler.shutdown();
+      }
+    });
   }
 
   /**
@@ -62,14 +69,22 @@ export class IRMQTTHomebridgePlatform implements DynamicPlatformPlugin {
     // EXAMPLE ONLY
     // A real plugin you would discover accessories from the local network, cloud services
     // or a user-defined array in the platform config.
-    const devices = this.config.devices;
+    const devices = Array.isArray(this.config.devices) ? this.config.devices : [];
     this.log.debug('Discovering devices:', devices.length);
     // loop over the discovered devices and register each one if it has not already been registered
     for (const device of devices) {
+      if (!device || typeof device.UniqueId !== 'string' || device.UniqueId.trim() === '') {
+        this.log.error('Skipping device without a stable UniqueId.');
+        continue;
+      }
+      if (!device.mqtt?.server || !device.mqtt?.prefix) {
+        this.log.error(`Skipping device '${device.UniqueId}': MQTT server and prefix are required.`);
+        continue;
+      }
       // generate a unique id for the accessory this should be generated from
       // something globally unique, but constant, for example, the device serial
       // number or MAC address
-      const uuid = this.api.hap.uuid.generate(device.UniqueId || Math.random().toString(36).substring(2, 15));
+      const uuid = this.api.hap.uuid.generate(device.UniqueId);
 
       // see if an accessory with the same uuid has already been registered and restored from
       // the cached devices we stored in the `configureAccessory` method above
@@ -85,7 +100,7 @@ export class IRMQTTHomebridgePlatform implements DynamicPlatformPlugin {
 
         // create the accessory handler for the restored accessory
         // this is imported from `platformAccessory.ts`
-        new IRMQTTPlatformAccessory(this, existingAccessory);
+        this.accessoryHandlers.push(new IRMQTTPlatformAccessory(this, existingAccessory));
 
         // it is possible to remove platform accessories at any time using `api.unregisterPlatformAccessories`, e.g.:
         // remove platform accessories when no longer present
@@ -104,7 +119,7 @@ export class IRMQTTHomebridgePlatform implements DynamicPlatformPlugin {
 
         // create the accessory handler for the newly create accessory
         // this is imported from `platformAccessory.ts`
-        new IRMQTTPlatformAccessory(this, accessory);
+        this.accessoryHandlers.push(new IRMQTTPlatformAccessory(this, accessory));
 
         // link the accessory to your platform
         this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
