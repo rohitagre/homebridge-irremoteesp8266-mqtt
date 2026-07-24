@@ -103,7 +103,7 @@ export class IRMQTTPlatformAccessory {
       .onGet(this.handleCoolingThresholdTemperatureGet.bind(this))
       .onSet(this.handleCoolingThresholdTemperatureSet.bind(this))
       .setProps({
-        minValue: 17,
+        minValue: 15,
         maxValue: 30,
         minStep: 1,
       });
