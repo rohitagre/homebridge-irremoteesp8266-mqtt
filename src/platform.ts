@@ -1,6 +1,18 @@
-import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformConfig, Service } from 'homebridge';
+import {
+  Categories,
+  type API,
+  type Characteristic,
+  type DynamicPlatformPlugin,
+  type Logging,
+  type PlatformAccessory,
+  type PlatformConfig,
+  type Service,
+} from 'homebridge';
 
 import { IRMQTTPlatformAccessory } from './platformAccessory.js';
+import type { SwitchDefinition } from './platformAccessory.js';
+import { IRMQTTSwitchAccessory } from './switchAccessory.js';
+import { IRMQTTSwingSliderAccessory } from './swingAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 
 /**
@@ -94,13 +106,18 @@ export class IRMQTTHomebridgePlatform implements DynamicPlatformPlugin {
         // the accessory already exists
         this.log.info('Restoring existing accessory from cache:', existingAccessory.displayName);
 
-        // if you need to update the accessory.context then you should run `api.updatePlatformAccessories`. e.g.:
-        // existingAccessory.context.device = device;
+        // Keep the accessory context in sync with the current configuration:
+        // restored accessories otherwise keep the device settings stored in the
+        // Homebridge cache, so config changes (enable flags, sleepMinutes, MQTT
+        // settings, …) would only apply after the cache is deleted.
+        existingAccessory.context.device = device;
         this.api.updatePlatformAccessories([existingAccessory]);
 
         // create the accessory handler for the restored accessory
         // this is imported from `platformAccessory.ts`
-        this.accessoryHandlers.push(new IRMQTTPlatformAccessory(this, existingAccessory));
+        const handler = new IRMQTTPlatformAccessory(this, existingAccessory);
+        this.accessoryHandlers.push(handler);
+        this.publishControlAccessories(existingAccessory, handler);
 
         // it is possible to remove platform accessories at any time using `api.unregisterPlatformAccessories`, e.g.:
         // remove platform accessories when no longer present
@@ -119,8 +136,9 @@ export class IRMQTTHomebridgePlatform implements DynamicPlatformPlugin {
 
         // create the accessory handler for the newly create accessory
         // this is imported from `platformAccessory.ts`
-        console.log(accessory);
-        this.accessoryHandlers.push(new IRMQTTPlatformAccessory(this, accessory));
+        const handler = new IRMQTTPlatformAccessory(this, accessory);
+        this.accessoryHandlers.push(handler);
+        this.publishControlAccessories(accessory, handler);
 
         // link the accessory to your platform
         this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
@@ -138,6 +156,58 @@ export class IRMQTTHomebridgePlatform implements DynamicPlatformPlugin {
         this.log.info('Removing existing accessory from cache:', accessory.displayName);
         this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       }
+    }
+  }
+
+  /**
+   * Publish one accessory per helper switch of the given A/C device, plus the
+   * swing slider accessory (see `switchAccessory.ts` / `swingAccessory.ts`).
+   *
+   * The controls used to be extra services of the A/C accessory, but the Apple
+   * Home app labels every tile with the name of the accessory it belongs to, so
+   * they were all displayed as the A/C name ("LG AC"). Giving each control its
+   * own accessory makes the Home app show its own label.
+   */
+  private publishControlAccessories(accessory: PlatformAccessory, handler: IRMQTTPlatformAccessory): void {
+    const device = accessory.context.device;
+    const newAccessories: PlatformAccessory[] = [];
+
+    /**
+     * Restore (or create) the accessory of one control. A stable, per-device
+     * unique UUID keeps the same HomeKit tile across restarts.
+     */
+    const controlAccessoryFor = (definition: SwitchDefinition, category: Categories): PlatformAccessory => {
+      const uuid = this.api.hap.uuid.generate(`${device.UniqueId}:${definition.subtype}`);
+      const existingAccessory = this.accessories.get(uuid);
+      const controlAccessory = existingAccessory
+        ?? new this.api.platformAccessory(definition.name, uuid, category);
+
+      controlAccessory.context.device = device;
+
+      if (!existingAccessory) {
+        newAccessories.push(controlAccessory);
+      }
+
+      // Mark the control as discovered, so it is not removed as an orphan below.
+      this.discoveredCacheUUIDs.push(uuid);
+      return controlAccessory;
+    };
+
+    for (const definition of handler.getSwitchDefinitions()) {
+      const controlAccessory = controlAccessoryFor(definition, Categories.SWITCH);
+      new IRMQTTSwitchAccessory(this, controlAccessory, handler, definition);
+      this.log.info('Publishing switch accessory:', controlAccessory.displayName);
+    }
+
+    const sliderDefinition = handler.getSwingSliderDefinition();
+    if (sliderDefinition) {
+      const controlAccessory = controlAccessoryFor(sliderDefinition, Categories.FAN);
+      new IRMQTTSwingSliderAccessory(this, controlAccessory, handler, sliderDefinition);
+      this.log.info('Publishing swing slider accessory:', controlAccessory.displayName);
+    }
+
+    if (newAccessories.length > 0) {
+      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, newAccessories);
     }
   }
 }

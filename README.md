@@ -10,18 +10,36 @@ To use your IRremote over MQTT and to homebridge using this plugin, you must hav
 
 ### Features
 
-The accessory is exposed as a HomeKit **HeaterCooler** plus a few helper switches:
+The accessory is exposed as a HomeKit **HeaterCooler** plus a **swing slider** and a few
+optional helper switches:
 
 | Control | Description |
 | --- | --- |
 | Power / Mode / Temperature / Fan | Standard HeaterCooler controls mapped to `power`, `mode`, `temp` and `fanspeed`. |
-| **Vertical Swing** | Dedicated switch that toggles the louvres between `auto` (continuous swing) and `off`. |
-| **Swing Lowest / Low / Middle / High / Highest** | Mutually-exclusive switches that park the louvres at a fixed vertical position (`swingv` = `lowest` … `highest`). |
+| **Swing** *(slider)* | One slider that covers every `swingv` value: `0 %` parks the vanes `off`, `17 % lowest`, `33 % low`, `50 % middle`, `67 % high`, `83 % highest` and `100 %` is `auto` (continuous swing). Published as a `Fan` accessory because that is the only HomeKit service the Home app renders as a slider. |
 | **Horizontal Swing** | Optional switch (`enableSwingH`), only supported by some LG models. |
 | **Display Light** | Optional switch (`enableLight`) that toggles the A/C display/LED. |
 | **Turbo Mode** | Switch mapped to the `turbo` topic (ignored by the LG IR protocol). |
 | **Quiet / Econo / Clean** | Switches mapped to the `quiet`, `econo` and `clean` topics (ignored by the LG IR protocol, useful for other A/C protocols). |
 | **Sleep Mode** | Applies a quiet preset (minimum fan, vanes parked at the lowest position and a 28 °C set point). |
+
+Set `swingControl` to `"switch"` if you prefer the classic layout: a **Vertical Swing**
+switch (`auto` vs `off`) plus one mutually-exclusive switch per vane position
+(**Swing Lowest / Low / Middle / High / Highest**).
+
+> **Note:** the A/C has a single set point, so the plugin mirrors it onto *both* HeaterCooler
+> threshold characteristics (`CoolingThresholdTemperature` and `HeatingThresholdTemperature`,
+> 15–30 °C) and onto `CurrentTemperature`. HomeKit renders the `auto` target state as a
+> heating/cooling range and hides the temperature slider completely when only one of the two
+> exists. The sketch cannot report the room temperature, so both temperature values on the tile
+> show the target temperature (the same behaviour as 1.0.8). Out-of-range values reported by
+> the sketch are clamped, since HomeKit drops the slider for those as well.
+
+Every control is published as **its own accessory**, so the Home app shows its own name
+(e.g. `Swing Low`) instead of repeating the name of the A/C accessory.
+**Every control is optional** – see [Choosing which controls to expose](#choosing-which-controls-to-expose)
+to keep the number of accessories down. Use `switchNamePrefix` to group them,
+e.g. `"LG AC Swing"`.
 
 ### State synchronisation
 
@@ -32,13 +50,15 @@ physical IR remote, by another MQTT client or by the A/C itself, the matching Ho
 control is updated:
 
 * the **HeaterCooler** tile follows `power`, `mode`, `temp` and `fanspeed`;
-* the **Vertical Swing** switch follows `swingv` (`auto` = on, any parked position = off);
-* the **Swing …** position switches highlight the reported `swingv` position;
+* the **Swing** slider follows `swingv` and snaps to the matching level (with
+  `swingControl: "switch"`, the **Vertical Swing** switch follows `swingv` –
+  `auto` = on, any parked position = off – and the **Swing …** position switches
+  highlight the reported position);
 * **Turbo Mode**, **Quiet**, **Econo**, **Clean** and **Display Light** follow `turbo`,
   `quiet`, `econo`, `clean` and `light`;
 * the **Sleep Mode** switch follows the real A/C state — it is only "on" while the A/C still
   matches the preset (28 °C, minimum fan, vanes at `lowest`). Change the temperature, fan or
-  swing from the remote and the switch turns itself off.
+  swing from the remote *or from the Home app* and the switch turns itself off.
 
 > **Note:** the LG IR protocol has no native sleep timer, so if you want the A/C to turn
 > itself off during the night, set `sleepMinutes` (e.g. `480` for 8 hours). The default is
@@ -77,12 +97,17 @@ control is updated:
             "displayName": "<Any>",
             "UniqueId": "<Any>",
             "sleepMinutes": 0,
+            "switchNamePrefix": "",
+            "swingControl": "slider",
+            "enableSwingV": true,
             "enableSwingH": false,
             "enableLight": false,
             "enableQuiet": true,
             "enableEcono": true,
             "enableClean": true,
             "enableSwingPosition": true,
+            "enableTurbo": true,
+            "enableSleep": true,
             "mqtt": {
                 "server": "<MQTT Server:1883>",
                 "prefix": "<prefix for accessory>",
@@ -99,9 +124,65 @@ control is updated:
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `sleepMinutes` | integer | `0` | Set to `0` to never turn the A/C off automatically. When > 0, the A/C is turned off that many minutes after **Sleep Mode** is switched on. |
-| `enableSwingH` | boolean | `false` | Expose the optional **Horizontal Swing** switch (LG models using the AKB73757604 remote). |
-| `enableLight` | boolean | `false` | Expose the optional **Display Light** switch. |
+| `switchNamePrefix` | string | `""` | Prefix added to the name of every control accessory, e.g. `"LG AC "` results in `LG AC Swing`. Handy when several A/C units are configured. Existing accessories are renamed on the next restart. |
+| `swingControl` | `"slider"` \| `"switch"` | `"slider"` | How the vertical swing is exposed: a single **Swing** slider (`slider`) or the classic **Vertical Swing** + per-position switches (`switch`). |
+| `enableSwingV` | boolean | `true` | Expose the vertical swing control (the **Swing** slider, or the **Vertical Swing** switch with `swingControl: "switch"`). |
+| `enableSwingH` | boolean | `false` | Expose the **Horizontal Swing** switch (LG models using the AKB73757604 remote). |
+| `enableLight` | boolean | `false` | Expose the **Display Light** switch. |
 | `enableQuiet` | boolean | `true` | Expose the **Quiet** switch (LG ignores this setting). |
 | `enableEcono` | boolean | `true` | Expose the **Econo** switch (LG ignores this setting). |
 | `enableClean` | boolean | `true` | Expose the **Clean** switch (LG ignores this setting). |
-| `enableSwingPosition` | boolean | `true` | Expose the **Swing Lowest / Low / Middle / High / Highest** position switches. |
+| `enableSwingPosition` | boolean | `true` | Expose the **Swing Lowest / Low / Middle / High / Highest** position switches (`swingControl: "switch"` only). |
+| `enableTurbo` | boolean | `true` | Expose the **Turbo Mode** switch (LG ignores this setting). |
+| `enableSleep` | boolean | `true` | Expose the **Sleep Mode** switch. |
+
+#### Choosing which controls to expose
+
+All controls are optional and fall back to the defaults above, so an existing
+`config.json` keeps working unchanged. With the defaults, an A/C publishes seven extra
+accessories (**Swing**, **Quiet**, **Econo**, **Clean**, **Turbo Mode** and **Sleep
+Mode**) next to the `LG AC` accessory that holds power, mode, temperature and fan.
+
+The LG IR protocol only really supports power, mode, temperature, fan, vertical and
+horizontal swing and the display light, so for an LG unit `Quiet`, `Econo`, `Clean` and
+`Turbo` change nothing on the A/C. Turning those off leaves a compact setup – an A/C tile
+plus a swing slider and the sleep preset:
+
+```json
+"devices": [
+    {
+        "name": "AC",
+        "displayName": "LG AC",
+        "UniqueId": "ac-1",
+        "switchNamePrefix": "LG AC ",
+        "swingControl": "slider",
+        "enableQuiet": false,
+        "enableEcono": false,
+        "enableClean": false,
+        "enableTurbo": false,
+        "mqtt": {
+            "server": "<MQTT Server:1883>",
+            "prefix": "<prefix for accessory>"
+        }
+    }
+]
+```
+
+That publishes only two extra accessories: `LG AC Swing` (slider) and `LG AC Sleep Mode`.
+With every `enable…` option set to `false` you get a single `LG AC` accessory and no extra
+tiles – note that the **Sleep Mode** preset (and with it `sleepMinutes`) can then no longer
+be switched on from HomeKit.
+
+
+#### Upgrading from 1.0.9-beta.1 or older
+
+The controls used to be extra services of the A/C accessory, which made the Home app
+label every one of them with the name of the A/C (e.g. `LG AC`). They are now published as
+separate accessories: the stale services are removed from the cached A/C accessory
+automatically on the first start, and the controls reappear as individual tiles with their
+own name. Room assignments and automations for those tiles have to be recreated once.
+
+The vertical swing is now a single **Swing** slider by default, so the `Vertical Swing`
+switch and the five `Swing …` position switches are replaced by one accessory. Set
+`"swingControl": "switch"` to keep the previous layout instead.
+

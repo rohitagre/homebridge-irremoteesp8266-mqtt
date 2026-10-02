@@ -17,6 +17,64 @@ const SWING_POSITIONS: ReadonlyArray<{ position: string; name: string }> = [
 ];
 
 /**
+ * Prefix used for the subtype of the fixed vane position switches, e.g.
+ * `swingv-lowest`. Used both as the accessory cache key and as the subtype of
+ * the switch accessory (see `switchAccessory.ts`).
+ */
+const SWING_POSITION_SUBTYPE_PREFIX = 'swingv-';
+
+/**
+ * Temperature range the LG protocol accepts and the HeaterCooler exposes. Values
+ * outside this range make the Home app drop the temperature slider entirely.
+ */
+const MIN_TEMP = 15;
+const MAX_TEMP = 30;
+
+/** Set point used until the A/C reports its own temperature. */
+const INITIAL_TEMP = 22;
+
+/**
+ * Subtype (and accessory cache key) of the swing slider accessory that
+ * `swingAccessory.ts` publishes.
+ */
+const SWING_SLIDER_SUBTYPE = 'swing-slider';
+
+/**
+ * How the vertical swing is exposed to HomeKit:
+ *
+ * * `slider` (default) – one `Fan` accessory whose `RotationSpeed` is rendered
+ *   as a slider by the Home app.
+ * * `switch` – the classic `Vertical Swing` switch plus one switch per fixed
+ *   vane position.
+ */
+export type SwingControl = 'slider' | 'switch';
+
+/**
+ * The `swingv` values mapped onto the slider of the swing accessory. The order
+ * follows the vane angle: parked off at 0 %, the discrete positions in between
+ * and continuous swing (auto) at 100 %.
+ */
+const SWING_SLIDER_STOPS: ReadonlyArray<{ value: number; swingv: string }> = [
+  { value: 0, swingv: 'off' },
+  { value: 17, swingv: 'lowest' },
+  { value: 33, swingv: 'low' },
+  { value: 50, swingv: 'middle' },
+  { value: 67, swingv: 'high' },
+  { value: 83, swingv: 'highest' },
+  { value: 100, swingv: 'auto' },
+];
+
+/**
+ * A helper switch that is published as a separate accessory. `subtype` is a
+ * stable identifier (`swingv`, `light`, `turbo`, `swingv-lowest`, …) and `name`
+ * is the label shown in the Home app.
+ */
+export interface SwitchDefinition {
+  subtype: string;
+  name: string;
+}
+
+/**
  * Platform Accessory
  * An instance of this class is created for each accessory your platform registers
  * Each accessory may expose multiple services of different service types.
@@ -24,15 +82,17 @@ const SWING_POSITIONS: ReadonlyArray<{ position: string; name: string }> = [
 
 export class IRMQTTPlatformAccessory {
   private service: Service;
-  private turboService: Service;
-  private sleepService: Service;
-  private swingService: Service;
-  private swingHService?: Service;
-  private lightService?: Service;
-  private quietService?: Service;
-  private econoService?: Service;
-  private cleanService?: Service;
-  private readonly swingPositionServices: Array<{ position: string; service: Service }> = [];
+  /**
+   * The helper switches (vertical/horizontal swing, display light, quiet,
+   * econo, clean, turbo, sleep mode and the fixed vane positions) are published
+   * as their own accessories - see `switchAccessory.ts`. Only the HomeKit
+   * `Service` objects are tracked here, so that A/C state changes can be pushed
+   * to them.
+   */
+  private readonly switchServices = new Map<string, Service>();
+  /** The `Fan` service of the swing slider accessory (see `swingAccessory.ts`). */
+  private swingSliderService?: Service;
+  private readonly swingControl: SwingControl;
   private sleepTimeout: NodeJS.Timeout | null = null;
   private sleepSyncTimeout: NodeJS.Timeout | null = null;
   private readonly sleepMinutes: number;
@@ -146,12 +206,33 @@ export class IRMQTTPlatformAccessory {
         minStep: 1,
       });
 
+    // The HAP defaults of the threshold characteristics (10 °C for cooling and
+    // 0 °C for heating) are below the supported range, so seed them with the
+    // initial set point first; otherwise HAP reports an "illegal value" warning
+    // for each of them when the range is applied.
+    this.service.setCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, INITIAL_TEMP);
+    this.service.setCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, INITIAL_TEMP);
+
     this.service.getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature)
       .onGet(this.handleCoolingThresholdTemperatureGet.bind(this))
       .onSet(this.handleCoolingThresholdTemperatureSet.bind(this))
       .setProps({
-        minValue: 15,
-        maxValue: 30,
+        minValue: MIN_TEMP,
+        maxValue: MAX_TEMP,
+        minStep: 1,
+      });
+
+    // The A/C has a single set point, but the Home app renders the `auto` target
+    // state as a heating/cooling *range* and hides the temperature slider
+    // completely when only one of the two threshold characteristics exists. Both
+    // are therefore exposed and kept in sync with the same value; writing either
+    // one sets the A/C temperature.
+    this.service.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
+      .onGet(this.handleCoolingThresholdTemperatureGet.bind(this))
+      .onSet(this.handleCoolingThresholdTemperatureSet.bind(this))
+      .setProps({
+        minValue: MIN_TEMP,
+        maxValue: MAX_TEMP,
         minStep: 1,
       });
 
@@ -162,112 +243,32 @@ export class IRMQTTPlatformAccessory {
       .onGet(this.handleSwingModeGet.bind(this))
       .onSet(this.handleSwingModeSet.bind(this));
 
-    // Dedicated switch for vertical swing. Several HomeKit clients (the Apple
-    // Home app in particular) don't render the optional SwingMode characteristic
-    // on a HeaterCooler service, so a switch is the reliable way to control it.
-    this.swingService = this.accessory.services.find(service => service.subtype === 'swingv')
-      || this.accessory.addService(this.platform.Service.Switch, 'Vertical Swing', 'swingv');
-    this.swingService.setCharacteristic(this.platform.Characteristic.Name, 'Vertical Swing');
-    this.swingService.getCharacteristic(this.platform.Characteristic.On)
-      .onGet(() => this.acstate.Swing)
-      .onSet(this.handleSwingSwitchSet.bind(this));
-
-    // Horizontal swing is only supported by a subset of LG models (e.g. the
-    // AKB73757604 remote), so it is opt-in via the device configuration.
-    if (accessory.context.device.enableSwingH === true) {
-      this.swingHService = this.accessory.services.find(service => service.subtype === 'swingh')
-        || this.accessory.addService(this.platform.Service.Switch, 'Horizontal Swing', 'swingh');
-      this.swingHService.setCharacteristic(this.platform.Characteristic.Name, 'Horizontal Swing');
-      this.swingHService.getCharacteristic(this.platform.Characteristic.On)
-        .onGet(() => this.acstate.SwingH)
-        .onSet(this.handleSwingHSwitchSet.bind(this));
-    }
-
-    // The display light is supported by the LG protocol. Opt-in so existing
-    // setups don't suddenly gain an extra switch.
-    if (accessory.context.device.enableLight === true) {
-      this.lightService = this.accessory.services.find(service => service.subtype === 'light')
-        || this.accessory.addService(this.platform.Service.Switch, 'Display Light', 'light');
-      this.lightService.setCharacteristic(this.platform.Characteristic.Name, 'Display Light');
-      this.lightService.getCharacteristic(this.platform.Characteristic.On)
-        .onGet(() => this.acstate.Light)
-        .onSet(this.handleLightSet.bind(this));
-    }
-
-    // Quiet / Econo / Clean. The IRMQTTServer sketch accepts and echoes these
-    // topics, but the LG IR protocol itself ignores them (they are useful for
-    // other A/C protocols). Enabled by default; set enableQuiet / enableEcono /
-    // enableClean to false to hide the switches.
-    if (accessory.context.device.enableQuiet !== false) {
-      this.quietService = this.accessory.services.find(service => service.subtype === 'quiet')
-        || this.accessory.addService(this.platform.Service.Switch, 'Quiet', 'quiet');
-      this.quietService.setCharacteristic(this.platform.Characteristic.Name, 'Quiet');
-      this.quietService.getCharacteristic(this.platform.Characteristic.On)
-        .onGet(() => this.acstate.Quiet)
-        .onSet(this.handleQuietSet.bind(this));
-    }
-
-    if (accessory.context.device.enableEcono !== false) {
-      this.econoService = this.accessory.services.find(service => service.subtype === 'econo')
-        || this.accessory.addService(this.platform.Service.Switch, 'Econo', 'econo');
-      this.econoService.setCharacteristic(this.platform.Characteristic.Name, 'Econo');
-      this.econoService.getCharacteristic(this.platform.Characteristic.On)
-        .onGet(() => this.acstate.Econo)
-        .onSet(this.handleEconoSet.bind(this));
-    }
-
-    if (accessory.context.device.enableClean !== false) {
-      this.cleanService = this.accessory.services.find(service => service.subtype === 'clean')
-        || this.accessory.addService(this.platform.Service.Switch, 'Clean', 'clean');
-      this.cleanService.setCharacteristic(this.platform.Characteristic.Name, 'Clean');
-      this.cleanService.getCharacteristic(this.platform.Characteristic.On)
-        .onGet(() => this.acstate.Clean)
-        .onSet(this.handleCleanSet.bind(this));
-    }
-
-    // Vertical swing position selector: one mutually-exclusive switch per fixed
-    // louvre position. "Auto" (continuous swing) lives on the Vertical Swing
-    // switch. Set enableSwingPosition to false to hide these.
-    if (accessory.context.device.enableSwingPosition !== false) {
-      for (const { position, name } of SWING_POSITIONS) {
-        const subtype = `swingv-${position}`;
-        const positionService = this.accessory.services.find(service => service.subtype === subtype)
-          || this.accessory.addService(this.platform.Service.Switch, name, subtype);
-        positionService.setCharacteristic(this.platform.Characteristic.Name, name);
-        positionService.getCharacteristic(this.platform.Characteristic.On)
-          .onGet(() => this.acstate.SwingPosition === position)
-          .onSet(value => this.handleSwingPositionSet(position, value));
-        this.swingPositionServices.push({ position, service: positionService });
+    // The helper switches (vertical/horizontal swing, display light, quiet,
+    // econo, clean, turbo and sleep mode) are published as their own accessories
+    // so that the Home app shows a proper label for each of them - see
+    // `getSwitchDefinitions()` and `switchAccessory.ts`.
+    for (const service of [...this.accessory.services]) {
+      if (service instanceof this.platform.Service.Switch) {
+        // Versions up to 1.0.9 exposed the switches as extra services of this
+        // accessory; they are also persisted in the Homebridge cache, so drop
+        // them to avoid duplicate (mis-labelled) tiles in the Home app.
+        this.platform.log.info('Removing legacy switch service from the A/C accessory:', service.displayName || service.subtype);
+        this.accessory.removeService(service);
       }
     }
 
-    this.turboService = this.accessory.services.find(service => service.subtype === 'turbo')
-      || this.accessory.addService(this.platform.Service.Switch, 'Turbo Mode', 'turbo');
-    this.turboService.setCharacteristic(this.platform.Characteristic.Name, 'Turbo Mode');
-    this.turboService.getCharacteristic(this.platform.Characteristic.On)
-      .onGet(() => this.acstate.Turbo)
-      .onSet(this.handleTurboSet.bind(this));
-
-    // "Sleep Mode" (previously "Low Fan Preset") applies a quiet preset and
-    // automatically turns the A/C off after `sleepMinutes` (default 60). The LG
-    // IR protocol has no native sleep timer, so the countdown is run by the
-    // plugin. The subtype is kept as 'low-fan-preset' so existing cached
-    // accessories are reused instead of duplicated.
-    this.sleepService = this.accessory.services.find(service => service.subtype === 'low-fan-preset')
-      || this.accessory.addService(this.platform.Service.Switch, 'Sleep Mode', 'low-fan-preset');
-    this.sleepService.setCharacteristic(this.platform.Characteristic.Name, 'Sleep Mode');
-    this.sleepService.getCharacteristic(this.platform.Characteristic.On)
-      .onGet(() => this.acstate.Sleep)
-      .onSet(this.handleSleepModeSet.bind(this));
-
     this.acstate = {
       On: false,
-      Mode: 3, // 0: Off, 1: Heat, 2: Cool, 3: Auto, 4: Fan
-      TargetMode: 2,
-      TargetTemp: 22,
+      // Characteristic.CurrentHeaterCoolerState: 0 = INACTIVE, 1 = IDLE,
+      // 2 = HEATING, 3 = COOLING. The A/C starts off, so the reported state must
+      // be INACTIVE - reporting "cooling" while the accessory is off makes the
+      // Home app render the tile without its controls.
+      Mode: this.platform.Characteristic.CurrentHeaterCoolerState.INACTIVE,
+      TargetMode: this.platform.Characteristic.TargetHeaterCoolerState.COOL,
+      TargetTemp: INITIAL_TEMP,
       DefaultTemp: 24,
       rotationSpeed: 1,
-      CurrentTemp: 22,
+      CurrentTemp: INITIAL_TEMP,
       Swing: false, // Vertical swing: off / auto
       SwingPosition: "off", // Last reported swingv position
       SwingH: false, // Horizontal swing: off / auto
@@ -285,6 +286,15 @@ export class IRMQTTPlatformAccessory {
     this.sleepMinutes = Number.isFinite(configuredSleepMinutes) && configuredSleepMinutes > 0
       ? configuredSleepMinutes
       : 0;
+    // The vertical swing is exposed as a slider by default; set
+    // `swingControl: "switch"` to get the classic Vertical Swing switch plus one
+    // switch per vane position instead.
+    this.swingControl = accessory.context.device.swingControl === 'switch' ? 'switch' : 'slider';
+    // Publish a valid set point before HomeKit reads the accessory: the HAP
+    // default for the threshold characteristics (10 °C) is outside the
+    // configured range, and an out-of-range value makes the Home app drop the
+    // temperature slider.
+    this.applyTargetTemperature(this.acstate.TargetTemp);
     this.mqttPrefix = accessory.context.device.mqtt.prefix;
 
     this.mqttTopic = {
@@ -324,6 +334,271 @@ export class IRMQTTPlatformAccessory {
     this.clearSleepSync();
     this.mqttClient?.end();
   }
+  /**
+   * Name of the A/C accessory. Only used for log messages; the helper switches
+   * are named after `getSwitchDefinitions()`.
+   */
+  public get name(): string {
+    return this.accessory.displayName;
+  }
+
+  /** `switchNamePrefix` of the device (`""` when not configured). */
+  private get namePrefix(): string {
+    const prefix = this.accessory.context.device.switchNamePrefix;
+    return typeof prefix === 'string' ? prefix : '';
+  }
+
+  /**
+   * The helper switches this A/C exposes. Each one is published as a separate
+   * accessory (`switchAccessory.ts`) so that the Home app shows its own label
+   * instead of the name of the A/C accessory.
+   *
+   * Every switch is optional: set the matching `enable…` option to `false` to
+   * hide it. When an option is not present in `config.json` the documented
+   * default is used, so existing configurations keep working unchanged.
+   */
+  public getSwitchDefinitions(): SwitchDefinition[] {
+    const device = this.accessory.context.device;
+    const label = (text: string) => `${this.namePrefix}${text}`;
+
+    const definitions: SwitchDefinition[] = [];
+
+    // Dedicated switch for vertical swing: several HomeKit clients (the Apple
+    // Home app in particular) don't render the optional SwingMode characteristic
+    // of a HeaterCooler service, so a switch is the reliable way to control it.
+    // Only used when `swingControl` is "switch", otherwise the swing slider
+    // accessory (`getSwingSliderDefinition()`) covers this.
+    if (this.swingControl === 'switch' && device.enableSwingV !== false) {
+      definitions.push({ subtype: 'swingv', name: label('Vertical Swing') });
+    }
+
+    // Horizontal swing is only supported by a subset of LG models (e.g. the
+    // AKB73757604 remote), so it is opt-in.
+    if (device.enableSwingH === true) {
+      definitions.push({ subtype: 'swingh', name: label('Horizontal Swing') });
+    }
+
+    // The display light is supported by the LG protocol. Opt-in so existing
+    // setups don't suddenly gain an extra switch.
+    if (device.enableLight === true) {
+      definitions.push({ subtype: 'light', name: label('Display Light') });
+    }
+
+    // Quiet / Econo / Clean. The IRMQTTServer sketch accepts and echoes these
+    // topics, but the LG IR protocol itself ignores them (they are useful for
+    // other A/C protocols).
+    if (device.enableQuiet !== false) {
+      definitions.push({ subtype: 'quiet', name: label('Quiet') });
+    }
+    if (device.enableEcono !== false) {
+      definitions.push({ subtype: 'econo', name: label('Econo') });
+    }
+    if (device.enableClean !== false) {
+      definitions.push({ subtype: 'clean', name: label('Clean') });
+    }
+
+    // Vertical swing position selector: one mutually-exclusive switch per fixed
+    // louvre position. "Auto" (continuous swing) lives on the Vertical Swing
+    // switch. Only used when `swingControl` is "switch".
+    if (this.swingControl === 'switch' && device.enableSwingPosition !== false) {
+      for (const { position, name } of SWING_POSITIONS) {
+        definitions.push({ subtype: `${SWING_POSITION_SUBTYPE_PREFIX}${position}`, name: label(name) });
+      }
+    }
+
+    // Turbo: accepted and echoed by the sketch, ignored by the LG protocol.
+    if (device.enableTurbo !== false) {
+      definitions.push({ subtype: 'turbo', name: label('Turbo Mode') });
+    }
+
+    // "Sleep Mode" (previously "Low Fan Preset") applies a quiet preset and
+    // automatically turns the A/C off after `sleepMinutes` (default 60). The LG
+    // IR protocol has no native sleep timer, so the countdown is run by the
+    // plugin. The subtype is kept as 'low-fan-preset' so existing cached
+    // accessories are reused instead of duplicated.
+    if (device.enableSleep !== false) {
+      definitions.push({ subtype: 'low-fan-preset', name: label('Sleep Mode') });
+    }
+
+    return definitions;
+  }
+
+  /**
+   * Current state of a helper switch, as tracked from the A/C state (which is
+   * updated from the MQTT status topics).
+   */
+  public getSwitchState(subtype: string): boolean {
+    if (subtype.startsWith(SWING_POSITION_SUBTYPE_PREFIX)) {
+      return this.acstate.SwingPosition === subtype.slice(SWING_POSITION_SUBTYPE_PREFIX.length);
+    }
+    const states: Record<string, boolean> = {
+      'swingv': this.acstate.Swing,
+      'swingh': this.acstate.SwingH,
+      'light': this.acstate.Light,
+      'quiet': this.acstate.Quiet,
+      'econo': this.acstate.Econo,
+      'clean': this.acstate.Clean,
+      'turbo': this.acstate.Turbo,
+      'low-fan-preset': this.acstate.Sleep,
+    };
+    return states[subtype] ?? false;
+  }
+
+  /**
+   * Handle a "SET" request coming from one of the helper switches.
+   */
+  public async setSwitchState(subtype: string, value: CharacteristicValue): Promise<void> {
+    if (subtype.startsWith(SWING_POSITION_SUBTYPE_PREFIX)) {
+      await this.handleSwingPositionSet(subtype.slice(SWING_POSITION_SUBTYPE_PREFIX.length), value);
+      return;
+    }
+    const handlers: Record<string, (onOff: CharacteristicValue) => Promise<void>> = {
+      'swingv': this.handleSwingSwitchSet.bind(this),
+      'swingh': this.handleSwingHSwitchSet.bind(this),
+      'light': this.handleLightSet.bind(this),
+      'quiet': this.handleQuietSet.bind(this),
+      'econo': this.handleEconoSet.bind(this),
+      'clean': this.handleCleanSet.bind(this),
+      'turbo': this.handleTurboSet.bind(this),
+      'low-fan-preset': this.handleSleepModeSet.bind(this),
+    };
+    const handler = handlers[subtype];
+    if (!handler) {
+      this.platform.log.warn(`Unknown switch '${subtype}' for ${this.accessory.displayName}.`);
+      return;
+    }
+    await handler(value);
+  }
+
+  /**
+   * Called by `IRMQTTSwitchAccessory` once its switch service exists, so that
+   * A/C state changes can be pushed to it.
+   */
+  public attachSwitchService(subtype: string, service: Service): void {
+    this.switchServices.set(subtype, service);
+    service.updateCharacteristic(this.platform.Characteristic.On, this.getSwitchState(subtype));
+  }
+
+  /**
+   * Push the state of a helper switch to the Home app (a no-op when the
+   * corresponding switch accessory is not published).
+   */
+  private updateSwitchState(subtype: string, on: boolean): void {
+    this.switchServices.get(subtype)?.updateCharacteristic(this.platform.Characteristic.On, on);
+  }
+
+  /**
+   * Apply the A/C set point.
+   *
+   * The A/C only has a single target temperature, so both HeaterCooler threshold
+   * characteristics are kept in sync with it: the Home app renders the `auto`
+   * target state as a heating/cooling range and hides the temperature slider
+   * when only one of the two exists. The value is clamped to the range the LG
+   * protocol supports (`MIN_TEMP`–`MAX_TEMP`), because an out-of-range value is
+   * rejected by HomeKit and the slider disappears.
+   */
+  private applyTargetTemperature(value: number): void {
+    const clamped = Math.min(MAX_TEMP, Math.max(MIN_TEMP, Math.round(value)));
+    if (clamped !== value) {
+      this.platform.log.debug(`Clamped target temperature ${value} to ${clamped} (supported range ${MIN_TEMP}-${MAX_TEMP} °C).`);
+    }
+    this.acstate.TargetTemp = clamped;
+    this.acstate.CurrentTemp = clamped;
+    this.service.updateCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, clamped);
+    this.service.updateCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature, clamped);
+    // The sketch cannot report the real room temperature, so the "current"
+    // temperature mirrors the set point - the Home app then shows the target
+    // temperature in both places (this is how 1.0.8 behaved as well).
+    this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, clamped);
+  }
+
+  /**
+   * The swing slider accessory (see `swingAccessory.ts`), or `null` when the
+   * vertical swing is exposed as switches (`swingControl: "switch"`) or disabled
+   * with `enableSwingV: false`.
+   */
+  public getSwingSliderDefinition(): SwitchDefinition | null {
+    if (this.swingControl !== 'slider' || this.accessory.context.device.enableSwingV === false) {
+      return null;
+    }
+    return { subtype: SWING_SLIDER_SUBTYPE, name: `${this.namePrefix}Swing` };
+  }
+
+  /**
+   * Slider position (0–100) of the swing accessory, derived from the last
+   * `swingv` value reported by the A/C.
+   */
+  public getSwingSliderValue(): number {
+    const stop = SWING_SLIDER_STOPS.find(candidate => candidate.swingv === this.acstate.SwingPosition);
+    if (stop) {
+      return stop.value;
+    }
+    // The A/C reported something unusual ("swing", "1", …), so fall back to the
+    // discrete swing state: continuous swing = 100 %, parked at the last
+    // position = 0 %.
+    return this.acstate.Swing ? 100 : 0;
+  }
+
+  /** `On` of the swing accessory: false only while the vanes are parked off. */
+  public getSwingSliderOn(): boolean {
+    return this.getSwingSliderValue() > 0;
+  }
+
+  /** Handle a slider change coming from the Home app. */
+  public async setSwingSliderValue(value: number): Promise<void> {
+    const stop = IRMQTTPlatformAccessory.swingSliderStopFor(value);
+    await this.applySwingv(stop.swingv);
+  }
+
+  /** Handle the on/off toggle of the swing accessory (on = continuous swing). */
+  public async setSwingSliderOn(on: boolean): Promise<void> {
+    await this.setSwingV(on);
+  }
+
+  /**
+   * Called by `IRMQTTSwingSliderAccessory` once its service exists, so that A/C
+   * state changes can be pushed to the slider.
+   */
+  public attachSwingSliderService(service: Service): void {
+    this.swingSliderService = service;
+    this.pushSwingSliderState();
+  }
+
+  /** Push the current swing state to the slider accessory. */
+  private pushSwingSliderState(): void {
+    if (!this.swingSliderService) {
+      return;
+    }
+    const value = this.getSwingSliderValue();
+    this.swingSliderService.updateCharacteristic(this.platform.Characteristic.RotationSpeed, value);
+    this.swingSliderService.updateCharacteristic(this.platform.Characteristic.On, value > 0);
+  }
+
+  /** The slider stop closest to the value the Home app sent. */
+  private static swingSliderStopFor(value: number): { value: number; swingv: string } {
+    let nearest = SWING_SLIDER_STOPS[0];
+    for (const stop of SWING_SLIDER_STOPS) {
+      if (Math.abs(stop.value - value) < Math.abs(nearest.value - value)) {
+        nearest = stop;
+      }
+    }
+    return nearest;
+  }
+
+  /** Apply a `swingv` payload and refresh every swing related HomeKit control. */
+  private async applySwingv(swingv: string): Promise<void> {
+    if (swingv === 'off') {
+      await this.setSwingV(false);
+      return;
+    }
+    if (swingv === 'auto') {
+      await this.setSwingV(true);
+      return;
+    }
+    await this.setSwingPosition(swingv);
+  }
+
+
 
   /**
    * Handle "SET" requests from HomeKit
@@ -355,6 +630,15 @@ export class IRMQTTPlatformAccessory {
       this.acstate.TargetTemp = this.acstate.CurrentTemp = this.acstate.DefaultTemp as number;
 
     }
+
+    // Reflect the change in HomeKit straight away; the MQTT status topics then
+    // confirm it. Without this the tile can stay in its previous state (e.g. the
+    // temperature slider stays hidden because the accessory is still "off").
+    this.service.updateCharacteristic(this.platform.Characteristic.Active,
+      this.acstate.On ? this.platform.Characteristic.Active.ACTIVE : this.platform.Characteristic.Active.INACTIVE);
+    this.service.updateCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState, this.acstate.Mode);
+    this.service.updateCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState, this.acstate.TargetMode);
+    this.applyTargetTemperature(this.acstate.TargetTemp);
   }
 
   /**
@@ -401,6 +685,7 @@ export class IRMQTTPlatformAccessory {
     this.acstate.Mode = value === this.platform.Characteristic.TargetHeaterCoolerState.COOL
       ? this.platform.Characteristic.CurrentHeaterCoolerState.COOLING
       : this.platform.Characteristic.CurrentHeaterCoolerState.IDLE;
+    this.service.updateCharacteristic(this.platform.Characteristic.CurrentHeaterCoolerState, this.acstate.Mode);
     this.platform.log.debug(this.accessory.displayName, 'Set Characteristic TargetHeaterCoolerState -> ', this.acstate.TargetMode);
   }
 
@@ -437,8 +722,12 @@ export class IRMQTTPlatformAccessory {
   * These are sent when the user changes the state of an accessory, for example, changing the Mode
   */
   private async handleCoolingThresholdTemperatureSet(value: CharacteristicValue) {
-    this.acstate.TargetTemp = this.acstate.CurrentTemp = value as number;
-    this.publishMessage(this.mqttTopic.temp, this.acstate.TargetTemp.toString());
+    const numeric = typeof value === 'number' ? value : Number(value);
+    this.applyTargetTemperature(numeric);
+    await this.publishMessage(this.mqttTopic.temp, this.acstate.TargetTemp.toString());
+    // A changed set point no longer matches the sleep preset, so re-evaluate the
+    // Sleep Mode switch here instead of waiting for the A/C to echo `stat/temp`.
+    this.scheduleSleepSync();
     this.platform.log.debug(this.accessory.displayName, 'Set Characteristic TargetTemp -> ', this.acstate.TargetTemp);
 
   }
@@ -467,6 +756,9 @@ export class IRMQTTPlatformAccessory {
     }
     this.publishMessage(this.mqttTopic.fanspeed, fanspeed);
     this.acstate.rotationSpeed = numericValue;
+    // A changed fan speed no longer matches the sleep preset (minimum fan), so
+    // re-evaluate the Sleep Mode switch instead of waiting for the `stat` echo.
+    this.scheduleSleepSync();
     this.platform.log.debug(this.accessory.displayName, 'Set Characteristic Mode -> ', numericValue);
 
   }
@@ -498,17 +790,22 @@ export class IRMQTTPlatformAccessory {
   }
 
   /**
-   * Keep the SwingMode characteristic, the Vertical Swing switch and every
-   * swing-position switch in sync with the reported A/C state.
+   * Keep the SwingMode characteristic, the swing slider accessory and every
+   * swing switch in sync with the reported A/C state.
    */
   private syncSwingCharacteristics(): void {
     const swinging = this.acstate.Swing;
     this.service.updateCharacteristic(this.platform.Characteristic.SwingMode,
       swinging ? this.platform.Characteristic.SwingMode.SWING_ENABLED : this.platform.Characteristic.SwingMode.SWING_DISABLED);
-    this.swingService.updateCharacteristic(this.platform.Characteristic.On, swinging);
-    for (const { position, service } of this.swingPositionServices) {
+    this.updateSwitchState('swingv', swinging);
+    for (const [subtype, service] of this.switchServices) {
+      if (!subtype.startsWith(SWING_POSITION_SUBTYPE_PREFIX)) {
+        continue;
+      }
+      const position = subtype.slice(SWING_POSITION_SUBTYPE_PREFIX.length);
       service.updateCharacteristic(this.platform.Characteristic.On, this.acstate.SwingPosition === position);
     }
+    this.pushSwingSliderState();
   }
 
   /**
@@ -520,6 +817,8 @@ export class IRMQTTPlatformAccessory {
     this.acstate.SwingPosition = on ? "auto" : "off";
     await this.publishMessage(this.mqttTopic.swingv, on ? "auto" : "off");
     this.syncSwingCharacteristics();
+    // Leaving the "lowest" position leaves the sleep preset.
+    this.scheduleSleepSync();
     this.platform.log.debug(this.accessory.displayName, 'Set Vertical Swing -> ', on);
   }
 
@@ -532,6 +831,8 @@ export class IRMQTTPlatformAccessory {
     this.acstate.SwingPosition = position;
     await this.publishMessage(this.mqttTopic.swingv, position);
     this.syncSwingCharacteristics();
+    // Only the "lowest" position is part of the sleep preset.
+    this.scheduleSleepSync();
     this.platform.log.debug(this.accessory.displayName, 'Set Swing Position -> ', position);
   }
 
@@ -547,35 +848,35 @@ export class IRMQTTPlatformAccessory {
   private async handleSwingHSwitchSet(value: CharacteristicValue) {
     this.acstate.SwingH = value === true;
     await this.publishMessage(this.mqttTopic.swingh, this.acstate.SwingH ? "auto" : "off");
-    this.swingHService?.updateCharacteristic(this.platform.Characteristic.On, this.acstate.SwingH);
+    this.updateSwitchState('swingh', this.acstate.SwingH);
     this.platform.log.debug(this.accessory.displayName, 'Set Horizontal Swing -> ', this.acstate.SwingH);
   }
 
   private async handleLightSet(value: CharacteristicValue) {
     this.acstate.Light = value === true;
     await this.publishMessage(this.mqttTopic.light, this.acstate.Light ? "on" : "off");
-    this.lightService?.updateCharacteristic(this.platform.Characteristic.On, this.acstate.Light);
+    this.updateSwitchState('light', this.acstate.Light);
     this.platform.log.debug(this.accessory.displayName, 'Set Display Light -> ', this.acstate.Light);
   }
 
   private async handleQuietSet(value: CharacteristicValue) {
     this.acstate.Quiet = value === true;
     await this.publishMessage(this.mqttTopic.quiet, this.acstate.Quiet ? "on" : "off");
-    this.quietService?.updateCharacteristic(this.platform.Characteristic.On, this.acstate.Quiet);
+    this.updateSwitchState('quiet', this.acstate.Quiet);
     this.platform.log.debug(this.accessory.displayName, 'Set Quiet -> ', this.acstate.Quiet);
   }
 
   private async handleEconoSet(value: CharacteristicValue) {
     this.acstate.Econo = value === true;
     await this.publishMessage(this.mqttTopic.econo, this.acstate.Econo ? "on" : "off");
-    this.econoService?.updateCharacteristic(this.platform.Characteristic.On, this.acstate.Econo);
+    this.updateSwitchState('econo', this.acstate.Econo);
     this.platform.log.debug(this.accessory.displayName, 'Set Econo -> ', this.acstate.Econo);
   }
 
   private async handleCleanSet(value: CharacteristicValue) {
     this.acstate.Clean = value === true;
     await this.publishMessage(this.mqttTopic.clean, this.acstate.Clean ? "on" : "off");
-    this.cleanService?.updateCharacteristic(this.platform.Characteristic.On, this.acstate.Clean);
+    this.updateSwitchState('clean', this.acstate.Clean);
     this.platform.log.debug(this.accessory.displayName, 'Set Clean -> ', this.acstate.Clean);
   }
 
@@ -602,19 +903,18 @@ export class IRMQTTPlatformAccessory {
       await this.publishMessage(this.mqttTopic.swingv, "lowest");
       await this.publishMessage(this.mqttTopic.temp, this.sleepTemp.toString());
       this.acstate.rotationSpeed = 25;
-      this.acstate.TargetTemp = this.acstate.CurrentTemp = this.sleepTemp;
       // The vanes are parked at the lowest position, so vertical swing is off.
       this.acstate.Swing = false;
       this.acstate.SwingPosition = "lowest";
       this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, 25);
-      this.service.updateCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, this.sleepTemp);
+      this.applyTargetTemperature(this.sleepTemp);
       this.syncSwingCharacteristics();
       this.startSleepTimer();
     } else {
       this.platform.log.info(`${this.accessory.displayName}: Sleep mode cancelled.`);
     }
     // Keep the switch authoritative even when triggered programmatically.
-    this.sleepService.updateCharacteristic(this.platform.Characteristic.On, on);
+    this.updateSwitchState('low-fan-preset', on);
     this.platform.log.debug(this.accessory.displayName, 'Set Sleep Mode -> ', on);
   }
 
@@ -671,7 +971,7 @@ export class IRMQTTPlatformAccessory {
     if (active !== this.acstate.Sleep) {
       this.acstate.Sleep = active;
       this.acstate.LowFanPreset = active;
-      this.sleepService.updateCharacteristic(this.platform.Characteristic.On, active);
+      this.updateSwitchState('low-fan-preset', active);
       this.platform.log.debug(this.accessory.displayName, 'Sleep Mode synced from A/C state -> ', active);
     }
   }
@@ -686,7 +986,7 @@ export class IRMQTTPlatformAccessory {
     if (this.acstate.Sleep) {
       this.acstate.Sleep = false;
       this.acstate.LowFanPreset = false;
-      this.sleepService.updateCharacteristic(this.platform.Characteristic.On, false);
+      this.updateSwitchState('low-fan-preset', false);
     }
   }
 
@@ -695,7 +995,7 @@ export class IRMQTTPlatformAccessory {
     this.acstate.Sleep = false;
     this.acstate.LowFanPreset = false;
     this.platform.log.info(`${this.accessory.displayName}: Sleep timer expired, turning the A/C off.`);
-    this.sleepService.updateCharacteristic(this.platform.Characteristic.On, false);
+    this.updateSwitchState('low-fan-preset', false);
     this.acstate.On = false;
     this.acstate.Mode = this.platform.Characteristic.CurrentHeaterCoolerState.INACTIVE;
     this.service.updateCharacteristic(this.platform.Characteristic.Active, this.platform.Characteristic.Active.INACTIVE);
@@ -834,9 +1134,7 @@ export class IRMQTTPlatformAccessory {
         if (!Number.isFinite(value)) {
           throw new Error(`Invalid temperature payload: ${message}`);
         }
-        this.acstate.TargetTemp = this.acstate.CurrentTemp = value;
-        this.service.updateCharacteristic(this.platform.Characteristic.CurrentTemperature, value);
-        this.service.updateCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature, value);
+        this.applyTargetTemperature(value);
         this.scheduleSleepSync();
       } else if (topic === this.mqttTopic.swingstat) {
         // Only "auto" (continuous swing) means swing is on. Discrete vane
@@ -848,27 +1146,27 @@ export class IRMQTTPlatformAccessory {
       } else if (topic === this.mqttTopic.swinghstat) {
         const value = message !== "off" && message !== "0";
         this.acstate.SwingH = value;
-        this.swingHService?.updateCharacteristic(this.platform.Characteristic.On, value);
+        this.updateSwitchState('swingh', value);
       } else if (topic === this.mqttTopic.turbostat) {
         const value = message === "on";
         this.acstate.Turbo = value;
-        this.turboService.updateCharacteristic(this.platform.Characteristic.On, value);
+        this.updateSwitchState('turbo', value);
       } else if (topic === this.mqttTopic.lightstat) {
         const value = message === "on";
         this.acstate.Light = value;
-        this.lightService?.updateCharacteristic(this.platform.Characteristic.On, value);
+        this.updateSwitchState('light', value);
       } else if (topic === this.mqttTopic.quietstat) {
         const value = message === "on";
         this.acstate.Quiet = value;
-        this.quietService?.updateCharacteristic(this.platform.Characteristic.On, value);
+        this.updateSwitchState('quiet', value);
       } else if (topic === this.mqttTopic.econostat) {
         const value = message === "on";
         this.acstate.Econo = value;
-        this.econoService?.updateCharacteristic(this.platform.Characteristic.On, value);
+        this.updateSwitchState('econo', value);
       } else if (topic === this.mqttTopic.cleanstat) {
         const value = message === "on";
         this.acstate.Clean = value;
-        this.cleanService?.updateCharacteristic(this.platform.Characteristic.On, value);
+        this.updateSwitchState('clean', value);
       } else if (topic === this.mqttTopic.fanspeedstat) {
         const value = message;
         let fanspeed = 100;

@@ -57,6 +57,31 @@
               "default": 0,
               "minimum": 0
             },
+            "switchNamePrefix": {
+              "title": "Switch Name Prefix",
+              "type": "string",
+              "description": "Optional prefix added to the name of every helper switch accessory (e.g. 'LG AC ' results in 'LG AC Swing Low'). Handy when several A/C units are configured. Existing accessories are renamed on the next restart.",
+              "required": false,
+              "default": ""
+            },
+            "swingControl": {
+              "title": "Swing Control",
+              "type": "string",
+              "enum": [
+                "slider",
+                "switch"
+              ],
+              "description": "How the vertical swing is exposed. 'slider' (default) publishes a single 'Swing' accessory that the Home app renders as a slider: 0% = off, 17% lowest, 33% low, 50% middle, 67% high, 83% highest, 100% = auto (continuous swing). 'switch' publishes the classic 'Vertical Swing' switch plus one switch per vane position.",
+              "required": false,
+              "default": "slider"
+            },
+            "enableSwingV": {
+              "title": "Enable Vertical Swing Control",
+              "type": "boolean",
+              "description": "Expose the vertical swing control: the 'Swing' slider, or the 'Vertical Swing' switch when 'Swing Control' is set to 'switch'. The Home app does not render the HeaterCooler swing characteristic, so this accessory is the only way to toggle the louvres from the Home app.",
+              "required": false,
+              "default": true
+            },
             "enableSwingH": {
               "title": "Enable Horizontal Swing",
               "type": "boolean",
@@ -95,7 +120,21 @@
             "enableSwingPosition": {
               "title": "Enable Swing Position Switches",
               "type": "boolean",
-              "description": "Expose one switch per fixed vertical louvre position (Swing Lowest / Low / Middle / High / Highest). Fully supported by the LG protocol.",
+              "description": "Expose one switch per fixed vertical louvre position (Swing Lowest / Low / Middle / High / Highest). Only used when 'Swing Control' is set to 'switch'; the 'slider' style covers the positions with a single slider.",
+              "required": false,
+              "default": true
+            },
+            "enableTurbo": {
+              "title": "Enable Turbo Switch",
+              "type": "boolean",
+              "description": "Expose the 'Turbo Mode' switch (turbo MQTT topic). Note: the LG IR protocol ignores this setting; it is useful for other A/C protocols.",
+              "required": false,
+              "default": true
+            },
+            "enableSleep": {
+              "title": "Enable Sleep Mode Switch",
+              "type": "boolean",
+              "description": "Expose the 'Sleep Mode' switch, which applies a quiet preset (minimum fan, vanes at the lowest position, 28 °C).",
               "required": false,
               "default": true
             },
