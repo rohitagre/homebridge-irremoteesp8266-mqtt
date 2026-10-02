@@ -13,6 +13,7 @@ import { IRMQTTPlatformAccessory } from './platformAccessory.js';
 import type { SwitchDefinition } from './platformAccessory.js';
 import { IRMQTTSwitchAccessory } from './switchAccessory.js';
 import { IRMQTTSwingSliderAccessory } from './swingAccessory.js';
+import { IRMQTTSwingPickerAccessory } from './swingPickerAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 
 /**
@@ -204,6 +205,13 @@ export class IRMQTTHomebridgePlatform implements DynamicPlatformPlugin {
       const controlAccessory = controlAccessoryFor(sliderDefinition, Categories.FAN);
       new IRMQTTSwingSliderAccessory(this, controlAccessory, handler, sliderDefinition);
       this.log.info('Publishing swing slider accessory:', controlAccessory.displayName);
+    }
+
+    const pickerDefinition = handler.getSwingPickerDefinition();
+    if (pickerDefinition) {
+      const controlAccessory = controlAccessoryFor(pickerDefinition, Categories.TELEVISION);
+      new IRMQTTSwingPickerAccessory(this, controlAccessory, handler, pickerDefinition);
+      this.log.info('Publishing swing picker accessory:', controlAccessory.displayName);
     }
 
     if (newAccessories.length > 0) {

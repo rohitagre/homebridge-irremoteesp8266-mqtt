@@ -69,16 +69,17 @@
               "type": "string",
               "enum": [
                 "slider",
-                "switch"
+                "switch",
+                "picker"
               ],
-              "description": "How the vertical swing is exposed. 'slider' (default) publishes a single 'Swing' accessory that the Home app renders as a slider: 0% = off, 17% lowest, 33% low, 50% middle, 67% high, 83% highest, 100% = auto (continuous swing). 'switch' publishes the classic 'Vertical Swing' switch plus one switch per vane position.",
+              "description": "How the vertical swing is exposed. 'slider' (default) publishes a single 'Swing' accessory that the Home app renders as a slider: 0% = off, 17% lowest, 33% low, 50% middle, 67% high, 83% highest, 100% = auto (continuous swing). 'switch' publishes the classic 'Vertical Swing' switch plus one switch per vane position. 'picker' publishes a single 'Swing' accessory rendered as a chooser (list) of Off / Lowest / Low / Middle / High / Highest / Auto.",
               "required": false,
               "default": "slider"
             },
             "enableSwingV": {
               "title": "Enable Vertical Swing Control",
               "type": "boolean",
-              "description": "Expose the vertical swing control: the 'Swing' slider, or the 'Vertical Swing' switch when 'Swing Control' is set to 'switch'. The Home app does not render the HeaterCooler swing characteristic, so this accessory is the only way to toggle the louvres from the Home app.",
+              "description": "Expose the vertical swing control: the 'Swing' slider by default, the 'Vertical Swing' switch when 'Swing Control' is set to 'switch', or the 'Swing' chooser when it is set to 'picker'. The Home app does not render the HeaterCooler swing characteristic, so this accessory is the only way to control the louvres from the Home app.",
               "required": false,
               "default": true
             },
@@ -120,7 +121,7 @@
             "enableSwingPosition": {
               "title": "Enable Swing Position Switches",
               "type": "boolean",
-              "description": "Expose one switch per fixed vertical louvre position (Swing Lowest / Low / Middle / High / Highest). Only used when 'Swing Control' is set to 'switch'; the 'slider' style covers the positions with a single slider.",
+              "description": "Expose one switch per fixed vertical louvre position (Swing Lowest / Low / Middle / High / Highest). Only used when 'Swing Control' is set to 'switch'; the 'slider' and 'picker' styles cover the positions with a single control.",
               "required": false,
               "default": true
             },

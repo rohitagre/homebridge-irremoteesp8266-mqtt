@@ -46,8 +46,38 @@ const SWING_SLIDER_SUBTYPE = 'swing-slider';
  *   as a slider by the Home app.
  * * `switch` – the classic `Vertical Swing` switch plus one switch per fixed
  *   vane position.
+ * * `picker` – one accessory rendered as a chooser: its `Television` service
+ *   carries one linked `InputSource` per vane position (`Off` … `Auto`), so the
+ *   list can be picked from directly (see `swingPickerAccessory.ts`).
  */
-export type SwingControl = 'slider' | 'switch';
+export type SwingControl = 'slider' | 'switch' | 'picker';
+
+/**
+ * The vertical swing values exposed by the picker accessory (`swingControl:
+ * "picker"`). The numeric `id` is stable and used both as the Television
+ * `ActiveIdentifier` and as the `Identifier` of the matching `InputSource`.
+ */
+export interface SwingPickerOption {
+  id: number;
+  swingv: string;
+  name: string;
+}
+
+const SWING_PICKER_OPTIONS: ReadonlyArray<SwingPickerOption> = [
+  { id: 1, swingv: 'off', name: 'Off' },
+  { id: 2, swingv: 'lowest', name: 'Lowest' },
+  { id: 3, swingv: 'low', name: 'Low' },
+  { id: 4, swingv: 'middle', name: 'Middle' },
+  { id: 5, swingv: 'high', name: 'High' },
+  { id: 6, swingv: 'highest', name: 'Highest' },
+  { id: 7, swingv: 'auto', name: 'Auto' },
+];
+
+/**
+ * Subtype (and accessory cache key) of the swing picker accessory that
+ * `swingPickerAccessory.ts` publishes.
+ */
+const SWING_PICKER_SUBTYPE = 'swing-picker';
 
 /**
  * The `swingv` values mapped onto the slider of the swing accessory. The order
@@ -92,11 +122,24 @@ export class IRMQTTPlatformAccessory {
   private readonly switchServices = new Map<string, Service>();
   /** The `Fan` service of the swing slider accessory (see `swingAccessory.ts`). */
   private swingSliderService?: Service;
+  /** The `Television` service of the swing picker accessory (see `swingPickerAccessory.ts`). */
+  private swingPickerService?: Service;
   private readonly swingControl: SwingControl;
   private sleepTimeout: NodeJS.Timeout | null = null;
   private sleepSyncTimeout: NodeJS.Timeout | null = null;
   private readonly sleepMinutes: number;
   private readonly sleepTemp = 28;
+  /**
+   * Turbo is a transient "boost" mode: it is only considered active while the
+   * A/C still matches the settings it was switched on with. Any change to the
+   * set point, fan speed or vane position (from the Home app, the IR remote or
+   * another MQTT client) turns the Turbo switch off again - the snapshot taken
+   * when turbo was enabled is what the current state is compared against.
+   */
+  private turboSyncTimeout: NodeJS.Timeout | null = null;
+  private turboBaseline: { temp: number; rotationSpeed: number; swingv: string } | null = null;
+  /** When turbo was switched on, used to absorb the following `stat` burst. */
+  private turboEnabledAt = 0;
 
   /**
    * These are just used to create a working example
@@ -286,10 +329,14 @@ export class IRMQTTPlatformAccessory {
     this.sleepMinutes = Number.isFinite(configuredSleepMinutes) && configuredSleepMinutes > 0
       ? configuredSleepMinutes
       : 0;
-    // The vertical swing is exposed as a slider by default; set
-    // `swingControl: "switch"` to get the classic Vertical Swing switch plus one
-    // switch per vane position instead.
-    this.swingControl = accessory.context.device.swingControl === 'switch' ? 'switch' : 'slider';
+    // The vertical swing is exposed as a slider by default. Set
+    // `swingControl: "switch"` for the classic Vertical Swing switch plus one
+    // switch per vane position, or `swingControl: "picker"` for a single chooser
+    // accessory listing every vane position.
+    const configuredSwingControl = accessory.context.device.swingControl;
+    this.swingControl = configuredSwingControl === 'switch' || configuredSwingControl === 'picker'
+      ? configuredSwingControl
+      : 'slider';
     // Publish a valid set point before HomeKit reads the accessory: the HAP
     // default for the threshold characteristics (10 °C) is outside the
     // configured range, and an out-of-range value makes the Home app drop the
@@ -332,6 +379,7 @@ export class IRMQTTPlatformAccessory {
   public shutdown(): void {
     this.clearSleepTimer();
     this.clearSleepSync();
+    this.clearTurboSync();
     this.mqttClient?.end();
   }
   /**
@@ -574,6 +622,82 @@ export class IRMQTTPlatformAccessory {
     this.swingSliderService.updateCharacteristic(this.platform.Characteristic.On, value > 0);
   }
 
+  /**
+   * The swing picker accessory (see `swingPickerAccessory.ts`), or `null` when
+   * the vertical swing is exposed as a slider/switch (`swingControl: "slider"`
+   * / `"switch"`) or disabled with `enableSwingV: false`.
+   */
+  public getSwingPickerDefinition(): SwitchDefinition | null {
+    if (this.swingControl !== 'picker' || this.accessory.context.device.enableSwingV === false) {
+      return null;
+    }
+    return { subtype: SWING_PICKER_SUBTYPE, name: `${this.namePrefix}Swing` };
+  }
+
+  /** The vane positions offered by the picker accessory. */
+  public getSwingPickerOptions(): ReadonlyArray<SwingPickerOption> {
+    return SWING_PICKER_OPTIONS;
+  }
+
+  /** Identifier of the option matching the last reported `swingv` value. */
+  public getSwingPickerActiveIdentifier(): number {
+    const option = SWING_PICKER_OPTIONS.find(candidate => candidate.swingv === this.acstate.SwingPosition);
+    return option ? option.id : SWING_PICKER_OPTIONS[0].id;
+  }
+
+  /** The picker is "on" whenever the vanes are not parked off. */
+  public getSwingPickerActive(): boolean {
+    return this.acstate.SwingPosition !== 'off';
+  }
+
+  /** Apply the vane position the user picked from the list. */
+  public async setSwingPickerIdentifier(id: number): Promise<void> {
+    const option = SWING_PICKER_OPTIONS.find(candidate => candidate.id === id);
+    if (!option) {
+      this.platform.log.warn(`Unknown swing picker identifier '${id}' for ${this.accessory.displayName}.`);
+      return;
+    }
+    await this.applySwingv(option.swingv);
+  }
+
+  /** Handle the picker's power toggle (on = continuous swing, off = park). */
+  public async setSwingPickerActive(on: boolean): Promise<void> {
+    await this.setSwingV(on);
+  }
+
+  /** Step to the next/previous vane position (used by the remote arrow keys). */
+  public async stepSwingPicker(delta: number): Promise<void> {
+    const currentIndex = SWING_PICKER_OPTIONS.findIndex(
+      candidate => candidate.id === this.getSwingPickerActiveIdentifier());
+    const index = currentIndex < 0 ? 0 : currentIndex;
+    const next = (index + delta + SWING_PICKER_OPTIONS.length) % SWING_PICKER_OPTIONS.length;
+    await this.setSwingPickerIdentifier(SWING_PICKER_OPTIONS[next].id);
+  }
+
+  /**
+   * Called by `IRMQTTSwingPickerAccessory` once its service exists, so that A/C
+   * state changes can be pushed to the chooser.
+   */
+  public attachSwingPickerService(service: Service): void {
+    this.swingPickerService = service;
+    this.pushSwingPickerState();
+  }
+
+  /** Push the current swing state to the picker accessory. */
+  private pushSwingPickerState(): void {
+    if (!this.swingPickerService) {
+      return;
+    }
+    this.swingPickerService.updateCharacteristic(
+      this.platform.Characteristic.Active,
+      this.getSwingPickerActive()
+        ? this.platform.Characteristic.Active.ACTIVE
+        : this.platform.Characteristic.Active.INACTIVE);
+    this.swingPickerService.updateCharacteristic(
+      this.platform.Characteristic.ActiveIdentifier,
+      this.getSwingPickerActiveIdentifier());
+  }
+
   /** The slider stop closest to the value the Home app sent. */
   private static swingSliderStopFor(value: number): { value: number; swingv: string } {
     let nearest = SWING_SLIDER_STOPS[0];
@@ -613,8 +737,9 @@ export class IRMQTTPlatformAccessory {
       this.publishMessage(this.mqttTopic.power, "off");
       this.acstate.On = false;
       this.acstate.Mode = this.platform.Characteristic.CurrentHeaterCoolerState.INACTIVE;
-      // Switching the A/C off cancels any running sleep timer.
+      // Switching the A/C off cancels any running sleep timer and turbo boost.
       this.stopSleepMode();
+      this.stopTurboMode();
     } else {
       if ((this.acstate.Mode === this.platform.Characteristic.CurrentHeaterCoolerState.INACTIVE)) {
         this.acstate.Mode = this.platform.Characteristic.CurrentHeaterCoolerState.COOLING;
@@ -728,6 +853,8 @@ export class IRMQTTPlatformAccessory {
     // A changed set point no longer matches the sleep preset, so re-evaluate the
     // Sleep Mode switch here instead of waiting for the A/C to echo `stat/temp`.
     this.scheduleSleepSync();
+    // Changing the set point also cancels an active turbo boost.
+    this.scheduleTurboSync();
     this.platform.log.debug(this.accessory.displayName, 'Set Characteristic TargetTemp -> ', this.acstate.TargetTemp);
 
   }
@@ -759,6 +886,8 @@ export class IRMQTTPlatformAccessory {
     // A changed fan speed no longer matches the sleep preset (minimum fan), so
     // re-evaluate the Sleep Mode switch instead of waiting for the `stat` echo.
     this.scheduleSleepSync();
+    // Changing the fan speed also cancels an active turbo boost.
+    this.scheduleTurboSync();
     this.platform.log.debug(this.accessory.displayName, 'Set Characteristic Mode -> ', numericValue);
 
   }
@@ -806,6 +935,7 @@ export class IRMQTTPlatformAccessory {
       service.updateCharacteristic(this.platform.Characteristic.On, this.acstate.SwingPosition === position);
     }
     this.pushSwingSliderState();
+    this.pushSwingPickerState();
   }
 
   /**
@@ -819,6 +949,8 @@ export class IRMQTTPlatformAccessory {
     this.syncSwingCharacteristics();
     // Leaving the "lowest" position leaves the sleep preset.
     this.scheduleSleepSync();
+    // Changing the swing also cancels an active turbo boost.
+    this.scheduleTurboSync();
     this.platform.log.debug(this.accessory.displayName, 'Set Vertical Swing -> ', on);
   }
 
@@ -833,6 +965,8 @@ export class IRMQTTPlatformAccessory {
     this.syncSwingCharacteristics();
     // Only the "lowest" position is part of the sleep preset.
     this.scheduleSleepSync();
+    // Changing the swing also cancels an active turbo boost.
+    this.scheduleTurboSync();
     this.platform.log.debug(this.accessory.displayName, 'Set Swing Position -> ', position);
   }
 
@@ -880,10 +1014,126 @@ export class IRMQTTPlatformAccessory {
     this.platform.log.debug(this.accessory.displayName, 'Set Clean -> ', this.acstate.Clean);
   }
 
+  /**
+   * Turbo Mode: a transient boost. Switching it on snapshots the current set
+   * point, fan speed and vane position; as soon as any of them changes the
+   * switch turns itself off again (see `syncTurboSwitch`).
+   */
   private async handleTurboSet(value: CharacteristicValue) {
-    this.acstate.Turbo = value as boolean;
-    this.publishMessage(this.mqttTopic.turbo, this.acstate.Turbo ? "on" : "off");
-    this.platform.log.debug(this.accessory.displayName, 'Set Turbo Mode -> ', this.acstate.Turbo);
+    const on = value === true;
+    this.clearTurboSync();
+    if (on) {
+      this.turboEnabledAt = Date.now();
+      this.captureTurboBaseline();
+    } else {
+      this.turboBaseline = null;
+    }
+    this.acstate.Turbo = on;
+    await this.publishMessage(this.mqttTopic.turbo, on ? "on" : "off");
+    // Keep the switch authoritative even when triggered programmatically.
+    this.updateSwitchState('turbo', on);
+    this.platform.log.debug(this.accessory.displayName, 'Set Turbo Mode -> ', on);
+  }
+
+  /** Snapshot the settings turbo was switched on with. */
+  private captureTurboBaseline(): void {
+    this.turboBaseline = {
+      temp: this.acstate.TargetTemp,
+      rotationSpeed: IRMQTTPlatformAccessory.normalizeRotationSpeed(this.acstate.rotationSpeed),
+      swingv: this.acstate.SwingPosition,
+    };
+  }
+
+  /**
+   * Debounced re-evaluation of the Turbo Mode switch. Enabling turbo and the
+   * changes that follow make the A/C echo several `stat` messages, so
+   * coalescing them avoids flicker.
+   */
+  private scheduleTurboSync(): void {
+    if (this.turboSyncTimeout) {
+      clearTimeout(this.turboSyncTimeout);
+    }
+    this.turboSyncTimeout = setTimeout(() => {
+      this.turboSyncTimeout = null;
+      this.syncTurboSwitch();
+    }, 750);
+  }
+
+  private clearTurboSync(): void {
+    if (this.turboSyncTimeout) {
+      clearTimeout(this.turboSyncTimeout);
+      this.turboSyncTimeout = null;
+    }
+  }
+
+  /**
+   * Reflect the real A/C state on the Turbo Mode switch: it is "on" only while
+   * the set point, fan speed and vane position still match the settings it was
+   * switched on with. Change any of them from the IR remote, the A/C itself, the
+   * Home app or another MQTT client and turbo is cancelled (both on the switch
+   * and on the `turbo` topic, so every client stays in sync).
+   */
+  private syncTurboSwitch(): void {
+    if (!this.acstate.Turbo || !this.turboBaseline) {
+      return;
+    }
+    // Enabling turbo (and reconnecting to the broker) makes the A/C / broker
+    // publish a burst of retained `stat` messages. Absorb them into the baseline
+    // instead of treating them as a user change, so a freshly enabled boost is
+    // not cancelled by its own echo.
+    if (Date.now() - this.turboEnabledAt < 2000) {
+      this.captureTurboBaseline();
+      return;
+    }
+    const baseline = this.turboBaseline;
+    const changed = baseline.temp !== this.acstate.TargetTemp
+      || baseline.rotationSpeed !== IRMQTTPlatformAccessory.normalizeRotationSpeed(this.acstate.rotationSpeed)
+      || baseline.swingv !== this.acstate.SwingPosition;
+    if (!changed) {
+      return;
+    }
+    this.acstate.Turbo = false;
+    this.turboBaseline = null;
+    this.updateSwitchState('turbo', false);
+    void this.publishMessage(this.mqttTopic.turbo, "off");
+    this.platform.log.info(`${this.accessory.displayName}: Turbo mode cancelled because the A/C settings changed.`);
+  }
+
+  /**
+   * Cancel turbo mode without sending any commands (used when the A/C is
+   * switched off by other means, e.g. from the Home app or the IR remote).
+   */
+  private stopTurboMode(): void {
+    this.clearTurboSync();
+    this.turboBaseline = null;
+    if (this.acstate.Turbo) {
+      this.acstate.Turbo = false;
+      this.updateSwitchState('turbo', false);
+    }
+  }
+
+  /**
+   * Normalise a `rotationSpeed` percentage onto the four `fanspeed` levels the
+   * sketch understands (auto / min / medium / max). Both the Home app (raw
+   * percentage) and the `stat` echo (25/50/75/100) are mapped the same way, so
+   * the turbo baseline and the live state can be compared without spurious
+   * differences.
+   */
+  private static normalizeRotationSpeed(value: number): number {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) {
+      return 100;
+    }
+    if (numericValue >= 75) {
+      return 75;
+    }
+    if (numericValue >= 50) {
+      return 50;
+    }
+    if (numericValue >= 25) {
+      return 25;
+    }
+    return 100;
   }
 
   /**
@@ -1124,8 +1374,9 @@ export class IRMQTTPlatformAccessory {
         this.acstate.On = value;
         if (!value) {
           // The A/C was switched off (possibly by the IR remote), so any running
-          // sleep timer is no longer relevant.
+          // sleep timer is no longer relevant and turbo is cancelled too.
           this.stopSleepMode();
+          this.stopTurboMode();
         }
         this.service.updateCharacteristic(this.platform.Characteristic.Active,
           value ? this.platform.Characteristic.Active.ACTIVE : this.platform.Characteristic.Active.INACTIVE);
@@ -1136,6 +1387,7 @@ export class IRMQTTPlatformAccessory {
         }
         this.applyTargetTemperature(value);
         this.scheduleSleepSync();
+        this.scheduleTurboSync();
       } else if (topic === this.mqttTopic.swingstat) {
         // Only "auto" (continuous swing) means swing is on. Discrete vane
         // positions such as "lowest" park the louvres, so swing is off.
@@ -1143,13 +1395,28 @@ export class IRMQTTPlatformAccessory {
         this.acstate.Swing = message === "auto" || message === "swing" || message === "1";
         this.syncSwingCharacteristics();
         this.scheduleSleepSync();
+        this.scheduleTurboSync();
       } else if (topic === this.mqttTopic.swinghstat) {
         const value = message !== "off" && message !== "0";
         this.acstate.SwingH = value;
         this.updateSwitchState('swingh', value);
       } else if (topic === this.mqttTopic.turbostat) {
         const value = message === "on";
-        this.acstate.Turbo = value;
+        if (value) {
+          // Snapshot the settings turbo was switched on with, so that a later
+          // change to any of them cancels turbo again. Re-baseline only when the
+          // switch was off (e.g. turbo enabled from the IR remote), so a change
+          // made from the Home app keeps the original snapshot.
+          if (!this.acstate.Turbo) {
+            this.acstate.Turbo = true;
+            this.turboEnabledAt = Date.now();
+            this.captureTurboBaseline();
+          }
+        } else {
+          this.acstate.Turbo = false;
+          this.turboBaseline = null;
+          this.clearTurboSync();
+        }
         this.updateSwitchState('turbo', value);
       } else if (topic === this.mqttTopic.lightstat) {
         const value = message === "on";
@@ -1182,6 +1449,7 @@ export class IRMQTTPlatformAccessory {
         this.acstate.rotationSpeed = fanspeed;
         this.service.updateCharacteristic(this.platform.Characteristic.RotationSpeed, fanspeed);
         this.scheduleSleepSync();
+        this.scheduleTurboSync();
       } else if (topic === this.mqttTopic.modestat) {
         const value = message;
         // Note: CurrentHeaterCoolerState and TargetHeaterCoolerState use

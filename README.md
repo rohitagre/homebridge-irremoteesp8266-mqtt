@@ -19,13 +19,20 @@ optional helper switches:
 | **Swing** *(slider)* | One slider that covers every `swingv` value: `0 %` parks the vanes `off`, `17 % lowest`, `33 % low`, `50 % middle`, `67 % high`, `83 % highest` and `100 %` is `auto` (continuous swing). Published as a `Fan` accessory because that is the only HomeKit service the Home app renders as a slider. |
 | **Horizontal Swing** | Optional switch (`enableSwingH`), only supported by some LG models. |
 | **Display Light** | Optional switch (`enableLight`) that toggles the A/C display/LED. |
-| **Turbo Mode** | Switch mapped to the `turbo` topic (ignored by the LG IR protocol). |
+| **Turbo Mode** | Switch mapped to the `turbo` topic (ignored by the LG IR protocol). A transient boost: changing the temperature, fan speed or swing cancels it again. |
 | **Quiet / Econo / Clean** | Switches mapped to the `quiet`, `econo` and `clean` topics (ignored by the LG IR protocol, useful for other A/C protocols). |
 | **Sleep Mode** | Applies a quiet preset (minimum fan, vanes parked at the lowest position and a 28 °C set point). |
 
-Set `swingControl` to `"switch"` if you prefer the classic layout: a **Vertical Swing**
-switch (`auto` vs `off`) plus one mutually-exclusive switch per vane position
-(**Swing Lowest / Low / Middle / High / Highest**).
+The vertical swing can be laid out in three different ways with `swingControl`:
+
+* `"slider"` (default) – the single **Swing** slider described above;
+* `"switch"` – the classic layout: a **Vertical Swing** switch (`auto` vs `off`)
+  plus one mutually-exclusive switch per vane position (**Swing Lowest / Low /
+  Middle / High / Highest**);
+* `"picker"` – a single **Swing** accessory rendered as a chooser (list) of
+  `Off / Lowest / Low / Middle / High / Highest / Auto`. This is implemented with
+  a HomeKit `Television` service and one input source per vane position, which is
+  the closest the Home app gets to a dropdown.
 
 > **Note:** the A/C has a single set point, so the plugin mirrors it onto *both* HeaterCooler
 > threshold characteristics (`CoolingThresholdTemperature` and `HeatingThresholdTemperature`,
@@ -53,12 +60,17 @@ control is updated:
 * the **Swing** slider follows `swingv` and snaps to the matching level (with
   `swingControl: "switch"`, the **Vertical Swing** switch follows `swingv` –
   `auto` = on, any parked position = off – and the **Swing …** position switches
-  highlight the reported position);
-* **Turbo Mode**, **Quiet**, **Econo**, **Clean** and **Display Light** follow `turbo`,
-  `quiet`, `econo`, `clean` and `light`;
+  highlight the reported position; with `swingControl: "picker"`, the **Swing**
+  chooser highlights the matching entry);
+* **Quiet**, **Econo**, **Clean** and **Display Light** follow `quiet`, `econo`,
+  `clean` and `light`;
 * the **Sleep Mode** switch follows the real A/C state — it is only "on" while the A/C still
   matches the preset (28 °C, minimum fan, vanes at `lowest`). Change the temperature, fan or
-  swing from the remote *or from the Home app* and the switch turns itself off.
+  swing from the remote *or from the Home app* and the switch turns itself off;
+* the **Turbo Mode** switch behaves like a transient boost — it is only "on" while the set
+  point, fan speed and vane position still match the settings it was switched on with. Change
+  the temperature, fan speed or swing from the remote *or from the Home app* and the switch
+  turns itself off again (and `turbo=off` is published, so other clients stay in sync).
 
 > **Note:** the LG IR protocol has no native sleep timer, so if you want the A/C to turn
 > itself off during the night, set `sleepMinutes` (e.g. `480` for 8 hours). The default is
@@ -125,8 +137,8 @@ control is updated:
 | --- | --- | --- | --- |
 | `sleepMinutes` | integer | `0` | Set to `0` to never turn the A/C off automatically. When > 0, the A/C is turned off that many minutes after **Sleep Mode** is switched on. |
 | `switchNamePrefix` | string | `""` | Prefix added to the name of every control accessory, e.g. `"LG AC "` results in `LG AC Swing`. Handy when several A/C units are configured. Existing accessories are renamed on the next restart. |
-| `swingControl` | `"slider"` \| `"switch"` | `"slider"` | How the vertical swing is exposed: a single **Swing** slider (`slider`) or the classic **Vertical Swing** + per-position switches (`switch`). |
-| `enableSwingV` | boolean | `true` | Expose the vertical swing control (the **Swing** slider, or the **Vertical Swing** switch with `swingControl: "switch"`). |
+| `swingControl` | `"slider"` \| `"switch"` \| `"picker"` | `"slider"` | How the vertical swing is exposed: a single **Swing** slider (`slider`), the classic **Vertical Swing** + per-position switches (`switch`), or a single **Swing** chooser listing every position (`picker`). |
+| `enableSwingV` | boolean | `true` | Expose the vertical swing control (the **Swing** slider, the **Vertical Swing** switch with `swingControl: "switch"`, or the **Swing** chooser with `swingControl: "picker"`). |
 | `enableSwingH` | boolean | `false` | Expose the **Horizontal Swing** switch (LG models using the AKB73757604 remote). |
 | `enableLight` | boolean | `false` | Expose the **Display Light** switch. |
 | `enableQuiet` | boolean | `true` | Expose the **Quiet** switch (LG ignores this setting). |
@@ -139,7 +151,7 @@ control is updated:
 #### Choosing which controls to expose
 
 All controls are optional and fall back to the defaults above, so an existing
-`config.json` keeps working unchanged. With the defaults, an A/C publishes seven extra
+`config.json` keeps working unchanged. With the defaults, an A/C publishes six extra
 accessories (**Swing**, **Quiet**, **Econo**, **Clean**, **Turbo Mode** and **Sleep
 Mode**) next to the `LG AC` accessory that holds power, mode, temperature and fan.
 
@@ -184,5 +196,7 @@ own name. Room assignments and automations for those tiles have to be recreated 
 
 The vertical swing is now a single **Swing** slider by default, so the `Vertical Swing`
 switch and the five `Swing …` position switches are replaced by one accessory. Set
-`"swingControl": "switch"` to keep the previous layout instead.
+`"swingControl": "switch"` to keep the previous layout instead, or
+`"swingControl": "picker"` for a single **Swing** chooser that lists `Off / Lowest / Low /
+Middle / High / Highest / Auto`.
 
