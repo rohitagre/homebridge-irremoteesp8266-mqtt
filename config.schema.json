@@ -49,6 +49,56 @@
               "required": true,
               "default": "LG AC"
             },
+            "sleepMinutes": {
+              "title": "Sleep Mode Auto-off (minutes)",
+              "type": "integer",
+              "description": "Set to 0 (default) to never turn the A/C off automatically. When greater than 0, the A/C is turned off this many minutes after 'Sleep Mode' is switched on. The LG IR protocol has no native sleep timer, so the plugin performs the countdown.",
+              "required": false,
+              "default": 0,
+              "minimum": 0
+            },
+            "enableSwingH": {
+              "title": "Enable Horizontal Swing",
+              "type": "boolean",
+              "description": "Expose an extra 'Horizontal Swing' switch. Only supported by some LG models (e.g. those using the AKB73757604 remote).",
+              "required": false,
+              "default": false
+            },
+            "enableLight": {
+              "title": "Enable Display Light",
+              "type": "boolean",
+              "description": "Expose an extra 'Display Light' switch to toggle the A/C's display/LED.",
+              "required": false,
+              "default": false
+            },
+            "enableQuiet": {
+              "title": "Enable Quiet Switch",
+              "type": "boolean",
+              "description": "Expose the 'Quiet' switch (quiet MQTT topic). Note: the LG IR protocol ignores this setting; it is useful for other A/C protocols.",
+              "required": false,
+              "default": true
+            },
+            "enableEcono": {
+              "title": "Enable Econo Switch",
+              "type": "boolean",
+              "description": "Expose the 'Econo' switch (econo MQTT topic). Note: the LG IR protocol ignores this setting; it is useful for other A/C protocols.",
+              "required": false,
+              "default": true
+            },
+            "enableClean": {
+              "title": "Enable Clean Switch",
+              "type": "boolean",
+              "description": "Expose the 'Clean' switch (clean MQTT topic). Note: the LG IR protocol ignores this setting; it is useful for other A/C protocols.",
+              "required": false,
+              "default": true
+            },
+            "enableSwingPosition": {
+              "title": "Enable Swing Position Switches",
+              "type": "boolean",
+              "description": "Expose one switch per fixed vertical louvre position (Swing Lowest / Low / Middle / High / Highest). Fully supported by the LG protocol.",
+              "required": false,
+              "default": true
+            },
             "mqtt": {
               "title": "MQTT Settings",
               "type": "object",
